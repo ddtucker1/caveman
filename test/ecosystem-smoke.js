@@ -153,11 +153,11 @@ function assert(cond, msg) {
   assert(Wildborn.animal.TURTLE_WATER_SPEED_MULT === 1, 'turtles keep land speed in water');
 }
 
-// --- Unit: caveman hitbox ---
+// --- Unit: caveman hitbox (visual is 2×; collision stays 15) ---
 {
-  assert(Wildborn.player.PLAYER_SIZE === 15, 'caveman hitbox is 15 (50% of prior 30)');
+  assert(Wildborn.player.PLAYER_SIZE === 15, 'caveman hitbox is 15');
   const p = Wildborn.player.createPlayer({ x: 0, y: 0 });
-  assert(p.w === 15 && p.h === 15, 'player spawn uses reduced hitbox');
+  assert(p.w === 15 && p.h === 15, 'player spawn uses 15×15 hitbox');
 }
 
 // --- Unit: animal factory ---
@@ -1074,19 +1074,19 @@ function assert(cond, msg) {
     'ecosystem asexual path produces offspring (' + eco.animals.length + ' animals, deer=' + afterStats.herbivores.deer + ')'
   );
   assert(parent.breedingCooldown > 0, 'parent cooldown set after ecosystem reproduction');
-  assert(Wildborn.config.maxAnimals === 120, 'default maxAnimals soft cap is 120');
+  assert(Wildborn.config.maxAnimals === undefined, 'no maxAnimals population cap');
 
   console.log('\nFinal stats:', JSON.stringify(afterStats, null, 2));
 }
 
-// --- Unit: population soft-cap blocks ecosystem breeding ---
+// --- Unit: population is uncapped — breeding accepts offspring past prior soft-cap ---
 {
-  const world = createWorld('pop-cap');
+  const world = createWorld('pop-uncapped');
   world.ensureMapLoaded();
   const eco = createEcosystem({
     world: world,
-    rng: createRng('pop-cap'),
-    config: Object.assign({}, Wildborn.config, { maxAnimals: 63 }),
+    rng: createRng('pop-uncapped'),
+    config: Object.assign({}, Wildborn.config),
     origin: { x: MAP_PIXEL_SIZE / 2, y: MAP_PIXEL_SIZE / 2 },
   });
   for (let i = 0; i < eco.animals.length; i++) {
@@ -1100,10 +1100,10 @@ function assert(cond, msg) {
     eco.update(1 / 30, { x: MAP_PIXEL_SIZE / 2, y: MAP_PIXEL_SIZE / 2 });
   }
   assert(
-    eco.animals.length <= Math.max(before, 63),
-    'population soft-cap blocks breeding at maxAnimals (' + eco.animals.length + ')'
+    eco.animals.length > before,
+    'uncapped population allows breeding past prior soft-cap (' + before + ' → ' + eco.animals.length + ')'
   );
-  assert(eco.getDebugStats().maxAnimals === 63, 'debug stats expose maxAnimals');
+  assert(eco.getDebugStats().maxAnimals === undefined, 'debug stats omit maxAnimals');
 }
 
 // --- Unit: pathfinder heap still finds short land paths ---

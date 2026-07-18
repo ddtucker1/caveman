@@ -142,14 +142,16 @@
   }
 
   /**
-   * Draw the player as a detailed caveman (scaled hitbox + sprite).
-   * Head, messy hair, swinging arms/legs, optional wooden club.
+   * Draw the player as a detailed caveman.
+   * Visual size is 2× the invisible hitbox; collision stays at player.w × player.h.
    */
   function drawPlayer(ctx, player, camera) {
     const screen = worldToScreen(camera, player.x, player.y);
     const cx = screen.x + player.w / 2;
     const cy = screen.y + player.h / 2;
-    const s = player.w; // hitbox / draw size (15)
+    /** Draw scale — twice the hitbox for a larger, more readable figure. */
+    const PLAYER_VISUAL_SCALE = 2;
+    const s = player.w * PLAYER_VISUAL_SCALE; // 30 when hitbox is 15
     const facing = player.facingX >= 0 ? 1 : -1;
     const phase = player.walkPhase || 0;
     const swing = Math.sin(phase) * 0.55;
@@ -159,94 +161,209 @@
     ctx.translate(cx, cy);
     ctx.scale(facing, 1);
 
-    // Shadow
-    ctx.fillStyle = 'rgba(0,0,0,0.16)';
+    // Shadow under feet
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
     ctx.beginPath();
-    ctx.ellipse(0, s * 0.42, s * 0.32, 3.5, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, s * 0.44, s * 0.34, s * 0.08, 0, 0, Math.PI * 2);
     ctx.fill();
 
     // Legs (swing opposite to arms)
-    const legLen = s * 0.28;
-    ctx.strokeStyle = '#6a4428';
-    ctx.lineWidth = 2.2;
-    ctx.lineCap = 'round';
+    const legLen = s * 0.30;
     const legSwing = moving ? swing : 0;
+    ctx.strokeStyle = '#6a4428';
+    ctx.lineWidth = s * 0.085;
+    ctx.lineCap = 'round';
     ctx.beginPath();
-    ctx.moveTo(-s * 0.08, s * 0.08);
-    ctx.lineTo(-s * 0.1 - Math.sin(legSwing) * 4, s * 0.08 + legLen);
-    ctx.moveTo(s * 0.08, s * 0.08);
-    ctx.lineTo(s * 0.1 + Math.sin(legSwing) * 4, s * 0.08 + legLen);
+    ctx.moveTo(-s * 0.09, s * 0.10);
+    ctx.lineTo(-s * 0.11 - Math.sin(legSwing) * s * 0.14, s * 0.10 + legLen);
+    ctx.moveTo(s * 0.09, s * 0.10);
+    ctx.lineTo(s * 0.11 + Math.sin(legSwing) * s * 0.14, s * 0.10 + legLen);
     ctx.stroke();
 
-    // Body — brown/tan, slightly wider at shoulders
-    ctx.fillStyle = '#c4a06a';
+    // Feet
+    ctx.fillStyle = '#5a3818';
     ctx.beginPath();
-    ctx.moveTo(-s * 0.22, -s * 0.08); // left shoulder
-    ctx.lineTo(s * 0.22, -s * 0.08); // right shoulder
-    ctx.lineTo(s * 0.16, s * 0.14); // right hip
-    ctx.lineTo(-s * 0.16, s * 0.14); // left hip
+    ctx.ellipse(
+      -s * 0.11 - Math.sin(legSwing) * s * 0.14,
+      s * 0.10 + legLen + s * 0.02,
+      s * 0.08,
+      s * 0.035,
+      0,
+      0,
+      Math.PI * 2
+    );
+    ctx.ellipse(
+      s * 0.11 + Math.sin(legSwing) * s * 0.14,
+      s * 0.10 + legLen + s * 0.02,
+      s * 0.08,
+      s * 0.035,
+      0,
+      0,
+      Math.PI * 2
+    );
+    ctx.fill();
+
+    // Loincloth / fur wrap at hips
+    ctx.fillStyle = '#7a4a22';
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.18, s * 0.10);
+    ctx.lineTo(s * 0.18, s * 0.10);
+    ctx.lineTo(s * 0.14, s * 0.22);
+    ctx.lineTo(0, s * 0.26);
+    ctx.lineTo(-s * 0.14, s * 0.22);
     ctx.closePath();
     ctx.fill();
+    // Fur fringe
+    ctx.strokeStyle = '#5a3414';
+    ctx.lineWidth = s * 0.035;
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.12, s * 0.20);
+    ctx.lineTo(-s * 0.14, s * 0.28);
+    ctx.moveTo(0, s * 0.24);
+    ctx.lineTo(0, s * 0.32);
+    ctx.moveTo(s * 0.12, s * 0.20);
+    ctx.lineTo(s * 0.14, s * 0.28);
+    ctx.stroke();
+
+    // Torso — tan skin, wider shoulders, slight belly
+    ctx.fillStyle = '#c4a06a';
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.24, -s * 0.10); // left shoulder
+    ctx.lineTo(s * 0.24, -s * 0.10); // right shoulder
+    ctx.lineTo(s * 0.18, s * 0.14); // right hip
+    ctx.lineTo(-s * 0.18, s * 0.14); // left hip
+    ctx.closePath();
+    ctx.fill();
+
+    // Chest muscle hint
+    ctx.strokeStyle = 'rgba(150, 110, 70, 0.35)';
+    ctx.lineWidth = s * 0.03;
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.08, -s * 0.02);
+    ctx.quadraticCurveTo(0, s * 0.04, s * 0.08, -s * 0.02);
+    ctx.stroke();
 
     // Arms (opposite swing to legs)
     const armSwing = moving ? -swing : 0;
     ctx.strokeStyle = '#b08958';
-    ctx.lineWidth = 2.2;
+    ctx.lineWidth = s * 0.085;
+    ctx.lineCap = 'round';
     ctx.beginPath();
-    ctx.moveTo(-s * 0.2, -s * 0.05);
-    ctx.lineTo(-s * 0.28 - Math.sin(armSwing) * 5, s * 0.12);
-    ctx.moveTo(s * 0.2, -s * 0.05);
-    ctx.lineTo(s * 0.28 + Math.sin(armSwing) * 5, s * 0.12);
+    ctx.moveTo(-s * 0.22, -s * 0.06);
+    ctx.lineTo(-s * 0.30 - Math.sin(armSwing) * s * 0.16, s * 0.14);
+    ctx.moveTo(s * 0.22, -s * 0.06);
+    ctx.lineTo(s * 0.30 + Math.sin(armSwing) * s * 0.16, s * 0.14);
     ctx.stroke();
 
-    // Wooden club in forward hand
-    const handX = s * 0.28 + Math.sin(armSwing) * 5;
-    const handY = s * 0.12;
-    ctx.strokeStyle = '#6a4420';
-    ctx.lineWidth = 2.4;
+    // Hands
+    const backHandX = -s * 0.30 - Math.sin(armSwing) * s * 0.16;
+    const backHandY = s * 0.14;
+    const handX = s * 0.30 + Math.sin(armSwing) * s * 0.16;
+    const handY = s * 0.14;
+    ctx.fillStyle = '#b08958';
     ctx.beginPath();
-    ctx.moveTo(handX, handY);
-    ctx.lineTo(handX + s * 0.22, handY - s * 0.18);
-    ctx.stroke();
-    // Club tip nub
-    ctx.fillStyle = '#5a3818';
-    ctx.beginPath();
-    ctx.arc(handX + s * 0.22, handY - s * 0.18, 2.2, 0, Math.PI * 2);
+    ctx.arc(backHandX, backHandY, s * 0.055, 0, Math.PI * 2);
+    ctx.arc(handX, handY, s * 0.055, 0, Math.PI * 2);
     ctx.fill();
 
-    // Head — round
-    const headR = s * 0.16;
-    const headY = -s * 0.22;
+    // Wooden club in forward hand
+    ctx.strokeStyle = '#6a4420';
+    ctx.lineWidth = s * 0.09;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(handX, handY);
+    ctx.lineTo(handX + s * 0.26, handY - s * 0.20);
+    ctx.stroke();
+    // Club head (knotty tip)
+    ctx.fillStyle = '#5a3818';
+    ctx.beginPath();
+    ctx.arc(handX + s * 0.26, handY - s * 0.20, s * 0.09, 0, Math.PI * 2);
+    ctx.fill();
+    // Wood grain line
+    ctx.strokeStyle = 'rgba(40, 24, 8, 0.45)';
+    ctx.lineWidth = s * 0.025;
+    ctx.beginPath();
+    ctx.moveTo(handX + s * 0.04, handY - s * 0.03);
+    ctx.lineTo(handX + s * 0.22, handY - s * 0.16);
+    ctx.stroke();
+
+    // Head
+    const headR = s * 0.175;
+    const headY = -s * 0.24;
     ctx.fillStyle = '#d4b08a';
     ctx.beginPath();
     ctx.arc(0, headY, headR, 0, Math.PI * 2);
     ctx.fill();
 
-    // Messy brown hair pixels on top
+    // Brow ridge
+    ctx.strokeStyle = '#b89068';
+    ctx.lineWidth = s * 0.045;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.11, headY - s * 0.04);
+    ctx.quadraticCurveTo(0, headY - s * 0.07, s * 0.11, headY - s * 0.04);
+    ctx.stroke();
+
+    // Messy brown hair clumps
     ctx.fillStyle = '#5a3a1a';
     const hair = [
-      [-4, -headR - 1],
-      [-1, -headR - 3],
-      [2, -headR - 2],
-      [5, -headR - 1],
-      [-3, -headR + 1],
-      [3, -headR + 1],
-      [0, -headR - 4],
+      [-0.14, -0.18],
+      [-0.06, -0.24],
+      [0.02, -0.26],
+      [0.10, -0.22],
+      [0.16, -0.16],
+      [-0.10, -0.12],
+      [0.08, -0.12],
+      [-0.02, -0.28],
+      [0.14, -0.10],
     ];
     for (let i = 0; i < hair.length; i++) {
-      ctx.fillRect(hair[i][0] - 1, headY + hair[i][1] - 1, 2.2, 2.2);
+      const hx = hair[i][0] * s;
+      const hy = headY + hair[i][1] * s;
+      ctx.beginPath();
+      ctx.arc(hx, hy, s * 0.055, 0, Math.PI * 2);
+      ctx.fill();
     }
 
-    // Eyes — two small black dots
-    ctx.fillStyle = '#1a120c';
+    // Ears
+    ctx.fillStyle = '#c49870';
     ctx.beginPath();
-    ctx.arc(-3.2, headY - 1, 1.15, 0, Math.PI * 2);
-    ctx.arc(3.2, headY - 1, 1.15, 0, Math.PI * 2);
+    ctx.ellipse(-headR * 0.95, headY + s * 0.01, s * 0.04, s * 0.055, 0, 0, Math.PI * 2);
+    ctx.ellipse(headR * 0.95, headY + s * 0.01, s * 0.04, s * 0.055, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // Nose — one larger dot
+    // Eyes
+    ctx.fillStyle = '#1a120c';
     ctx.beginPath();
-    ctx.arc(0.5, headY + 2.5, 1.6, 0, Math.PI * 2);
+    ctx.arc(-s * 0.055, headY - s * 0.01, s * 0.032, 0, Math.PI * 2);
+    ctx.arc(s * 0.055, headY - s * 0.01, s * 0.032, 0, Math.PI * 2);
+    ctx.fill();
+    // Eye whites (tiny highlight)
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.beginPath();
+    ctx.arc(-s * 0.048, headY - s * 0.018, s * 0.012, 0, Math.PI * 2);
+    ctx.arc(s * 0.062, headY - s * 0.018, s * 0.012, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Nose
+    ctx.fillStyle = '#b88860';
+    ctx.beginPath();
+    ctx.ellipse(s * 0.01, headY + s * 0.04, s * 0.035, s * 0.045, 0.15, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Mouth
+    ctx.strokeStyle = '#8a6040';
+    ctx.lineWidth = s * 0.025;
+    ctx.beginPath();
+    ctx.arc(0, headY + s * 0.09, s * 0.045, 0.15, Math.PI - 0.15);
+    ctx.stroke();
+
+    // Short beard stubble
+    ctx.fillStyle = 'rgba(70, 45, 25, 0.45)';
+    ctx.beginPath();
+    ctx.arc(-s * 0.05, headY + s * 0.11, s * 0.03, 0, Math.PI * 2);
+    ctx.arc(0, headY + s * 0.13, s * 0.035, 0, Math.PI * 2);
+    ctx.arc(s * 0.05, headY + s * 0.11, s * 0.03, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.restore();

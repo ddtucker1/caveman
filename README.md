@@ -12,10 +12,11 @@ Canvas draw work — not from browser chrome.
 
 This build therefore also includes gameplay/engine caps that *do* protect frame rate:
 
-- Soft animal population cap (`maxAnimals`, default 120)
 - Distance-based simulation LOD (far animals update less often)
 - Per-frame A\* pathfinding budget + binary-heap pathfinder
 - Cheaper spatial-grid rebuilds and throttled minimap entity dots
+
+Animal population is uncapped; breeding is limited only by calories, cooldown, and the food web.
 
 ## Play (double-click)
 
@@ -84,7 +85,6 @@ In `src/config.js`:
 - `mapTiles` — fixed playable map size (default `400` → 12800×12800 px)
 - `ecosystemEnabled` — master toggle (default `true`)
 - `ecosystemTickSeconds` — discrete hunger/growth tick rate
-- `maxAnimals` — soft population cap (breeding stops at this living count)
 - `simLodNearPx` / `simLodFarEveryN` — simulation LOD around the player
 - `pathfindMaxNodes` / `pathfindBudgetPerFrame` — A\* cost controls
 - `minimapEntityInterval` — how often minimap entity dots refresh
