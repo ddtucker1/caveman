@@ -17,9 +17,10 @@
   function findPath(world, startTx, startTy, goalTx, goalTy, opts) {
     opts = opts || {};
     const allowWater = !!opts.allowWater;
-    const maxNodes = opts.maxNodes || 2500;
-    const mapW = world.MAP_TILES || Wildborn.world.MAP_TILES || 100;
-    const mapH = world.MAP_TILES || Wildborn.world.MAP_TILES || 100;
+    // 200×200 map: allow longer paths (Manhattan up to ~400 tiles)
+    const maxNodes = opts.maxNodes || 12000;
+    const mapW = world.MAP_TILES || Wildborn.world.MAP_TILES || 200;
+    const mapH = world.MAP_TILES || Wildborn.world.MAP_TILES || 200;
     const TILE_SIZE = world.TILE_SIZE || Wildborn.world.TILE_SIZE || 32;
 
     startTx = clampInt(startTx, 0, mapW - 1);
@@ -139,8 +140,8 @@
   }
 
   function nearestWalkable(world, tx, ty, allowWater, maxR) {
-    const mapW = world.MAP_TILES || 100;
-    const mapH = world.MAP_TILES || 100;
+    const mapW = world.MAP_TILES || 200;
+    const mapH = world.MAP_TILES || 200;
     for (let r = 0; r <= maxR; r++) {
       for (let dy = -r; dy <= r; dy++) {
         for (let dx = -r; dx <= r; dx++) {

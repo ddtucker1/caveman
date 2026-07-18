@@ -46,9 +46,9 @@ function assert(cond, msg) {
 
 // --- Unit: map size ---
 {
-  assert(MAP_TILES === 100, 'map is 100×100 tiles');
+  assert(MAP_TILES === 200, 'map is 200×200 tiles');
   assert(TILE_SIZE === 32, 'tile size is 32px');
-  assert(MAP_PIXEL_SIZE === 3200, 'map is 3200×3200 pixels');
+  assert(MAP_PIXEL_SIZE === 6400, 'map is 6400×6400 pixels');
 }
 
 // --- Unit: spatial grid ---
@@ -91,16 +91,32 @@ function assert(cond, msg) {
   assert(p.calories === 10, 'plant starts with 10 calories');
   const taken = consumePlant(p, 100);
   assert(taken === 10 && !p.alive, 'consumePlant depletes and kills plant (stays in memory)');
-  assert(p.respawnTimer === RESPAWN_DELAY_TICKS, 'respawn timer starts at 60s (120 ticks)');
-  assert(RESPAWN_DELAY_TICKS === 120, 'RESPAWN_DELAY_TICKS is 120');
+  assert(p.growthPaused === true, 'eating pauses plant growth');
+  assert(p.respawnTimer === RESPAWN_DELAY_TICKS, 'respawn timer starts at 300s (600 ticks)');
+  assert(RESPAWN_DELAY_TICKS === 600, 'RESPAWN_DELAY_TICKS is 600');
+  assert(Wildborn.plant.RESPAWN_DELAY_SECONDS === 300, 'RESPAWN_DELAY_SECONDS is 300');
   // Fast-forward respawn
   p.respawnTimer = 1;
   updatePlant(p, () => ({ x: 50, y: 50 }));
   assert(p.alive && p.x === 50, 'plant teleports on respawn');
+  assert(p.growthPaused === false, 'growth resumes after respawn');
   assert(
     p.calories === p.maxCalories * RESPAWN_CALORIE_RATIO,
     'plant respawns at 50% max calories (' + p.calories + ')'
   );
+}
+
+// --- Unit: growth pauses once eating starts ---
+{
+  const p = createPlant('grass', 0, 0);
+  p.calories = 20;
+  Wildborn.plant.pauseGrowth(p);
+  updatePlant(p, null);
+  assert(p.calories === 20, 'paused plant does not grow (' + p.calories + ')');
+  // Without pause, same plant would grow
+  p.growthPaused = false;
+  updatePlant(p, null);
+  assert(p.calories === 22.5, 'unpaused plant grows normally');
 }
 
 // --- Unit: plant growth / calorie density ---
@@ -391,8 +407,8 @@ function assert(cond, msg) {
     config: {
       ecosystemEnabled: true,
       ecosystemTickSeconds: 0.5,
-      mapTiles: 100,
-      ecosystemSpawnRadius: 50 * TILE_SIZE,
+      mapTiles: 200,
+      ecosystemSpawnRadius: 100 * TILE_SIZE,
       spatialCellSize: 64,
     },
     origin: { x: MAP_PIXEL_SIZE / 2, y: MAP_PIXEL_SIZE / 2 },
@@ -400,8 +416,8 @@ function assert(cond, msg) {
 
   assert(eco.plants.length === INITIAL_PLANT_COUNT, 'spawns 150 plants');
   assert(INITIAL_PLANT_COUNT === 150, 'INITIAL_PLANT_COUNT is 150');
-  assert(eco.mapTiles === 100, 'ecosystem mapTiles is 100');
-  assert(eco.mapPixelSize === 3200, 'ecosystem mapPixelSize is 3200');
+  assert(eco.mapTiles === 200, 'ecosystem mapTiles is 200');
+  assert(eco.mapPixelSize === 6400, 'ecosystem mapPixelSize is 6400');
 
   // Plants should be on land (not water) and within map
   let plantsOnLand = 0;
@@ -417,7 +433,7 @@ function assert(cond, msg) {
   }
   assert(plantsOnWater === 0, 'no plants spawned on water');
   assert(plantsOnLand === eco.plants.length, 'all plants spawned on land (' + plantsOnLand + '/' + eco.plants.length + ')');
-  assert(plantsInBounds === eco.plants.length, 'all plants inside 100×100 map');
+  assert(plantsInBounds === eco.plants.length, 'all plants inside 200×200 map');
 
   // Predators start roaming (not hunting) when well-fed
   const wolves = eco.animals.filter((a) => a.species === 'wolf');
@@ -471,14 +487,28 @@ function assert(cond, msg) {
   assert(kids.every((k) => !k.isAdult && k.species === 'deer'), 'offspring are juvenile deer');
   assert(deerA.breedingCooldown === Wildborn.animal.BREED_COOLDOWN, 'breeding cooldown applied');
 
-  // Natural breeding should have grown some populations during the sim
-  const naturalGrowth =
-    stats.herbivores.rabbit > 10 ||
-    stats.herbivores.lizard > 8 ||
-    stats.predators.wolf > 4;
-  assert(naturalGrowth, 'natural breeding grew at least one population during sim');
+  // Ecosystem breeding path (deterministic): on 200×200 animals rarely meet in 60s,
+  // so place two fertile mates adjacent and confirm the tick loop produces offspring.
+  const beforeCount = eco.animals.length;
+  const mateA = Wildborn.animal.createAnimal('deer', 200, 200, { sex: 'female' });
+  const mateB = Wildborn.animal.createAnimal('deer', 210, 200, { sex: 'male' });
+  mateA.calories = mateA.maxCalories;
+  mateB.calories = mateB.maxCalories;
+  mateA.breedingCooldown = 0;
+  mateB.breedingCooldown = 0;
+  mateA.state = Wildborn.animal.AI_STATE.SEEK_MATE;
+  mateB.state = Wildborn.animal.AI_STATE.SEEK_MATE;
+  eco.animals.push(mateA, mateB);
+  for (let i = 0; i < 30 * 5; i++) {
+    eco.update(dt);
+  }
+  const afterStats = eco.getDebugStats();
+  assert(
+    eco.animals.length > beforeCount + 2 || afterStats.herbivores.deer > 8,
+    'ecosystem breeding path produces offspring (' + eco.animals.length + ' animals, deer=' + afterStats.herbivores.deer + ')'
+  );
 
-  console.log('\nFinal stats:', JSON.stringify(stats, null, 2));
+  console.log('\nFinal stats:', JSON.stringify(afterStats, null, 2));
 }
 
 // --- Ensure no chicken/egg references remain in source ---

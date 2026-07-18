@@ -82,8 +82,8 @@
       player.y = nextY;
     }
 
-    // Hard clamp to the fixed 100×100 map edges
-    const mapPx = world.MAP_PIXEL_SIZE || Wildborn.world.MAP_PIXEL_SIZE || 3200;
+    // Hard clamp to the fixed 200×200 map edges
+    const mapPx = world.MAP_PIXEL_SIZE || Wildborn.world.MAP_PIXEL_SIZE || 6400;
     player.x = Math.max(0, Math.min(mapPx - player.w, player.x));
     player.y = Math.max(0, Math.min(mapPx - player.h, player.y));
 
@@ -117,9 +117,9 @@
     return false;
   }
 
-  /** Find a walkable spawn near the center of the fixed 100×100 map. */
+  /** Find a walkable spawn near the center of the fixed 200×200 map. */
   function findSpawn(world, maxRadius) {
-    const mapTiles = world.MAP_TILES || Wildborn.world.MAP_TILES || 100;
+    const mapTiles = world.MAP_TILES || Wildborn.world.MAP_TILES || 200;
     const cx = Math.floor(mapTiles / 2);
     const cy = Math.floor(mapTiles / 2);
     maxRadius = maxRadius == null ? mapTiles : maxRadius;

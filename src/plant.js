@@ -1,7 +1,8 @@
 /**
  * Ecosystem plants — grow calories over time, eaten by herbivores (and bears).
- * When depleted they become invisible, sprout for 60s, then teleport to a
+ * When depleted they become invisible, sprout for 300s, then teleport to a
  * random land tile at 50% max calories (entity stays in memory).
+ * Growth pauses the moment any animal starts eating until respawn.
  */
 (function (global) {
   const Wildborn = (global.Wildborn = global.Wildborn || {});
@@ -63,9 +64,9 @@
 
   const SPECIES_LIST = Object.keys(PLANT_SPECIES);
   const START_CALORIES = 10;
-  /** 60 seconds at 0.5s/tick → 120 ticks. */
-  const RESPAWN_DELAY_SECONDS = 60;
-  const RESPAWN_DELAY_TICKS = 120;
+  /** 300 seconds (5 min) at 0.5s/tick → 600 ticks. */
+  const RESPAWN_DELAY_SECONDS = 300;
+  const RESPAWN_DELAY_TICKS = 600;
   /** Fraction of max calories restored on respawn. */
   const RESPAWN_CALORIE_RATIO = 0.5;
 
@@ -93,6 +94,8 @@
       maxCalories: def.maxCalories,
       growthPerTick: def.growthPerTick,
       alive: true,
+      /** Set true when any animal starts eating; cleared only on respawn. */
+      growthPaused: false,
       respawnTimer: 0,
       /** 0→1 sprout growth while waiting to respawn. */
       sproutProgress: 0,
@@ -121,11 +124,21 @@
   }
 
   /**
+   * Mark growth paused — called when any animal starts eating this plant.
+   * Growth stays off until the plant is fully depleted and respawned.
+   */
+  function pauseGrowth(plant) {
+    plant.growthPaused = true;
+  }
+
+  /**
    * Consume up to `amount` calories. Returns calories actually eaten.
-   * Marks plant dead (starts respawn) when calories hit 0 — stays in memory.
+   * Marks plant dead (starts 300s respawn) when calories hit 0 — stays in memory.
+   * First bite also pauses growth for the rest of this life cycle.
    */
   function consumePlant(plant, amount) {
     if (!plant.alive || plant.calories <= 0) return 0;
+    plant.growthPaused = true;
     const taken = Math.min(plant.calories, amount);
     plant.calories -= taken;
     if (plant.calories <= 0) {
@@ -138,13 +151,15 @@
   }
 
   /**
-   * One ecosystem tick: grow if alive, or advance 60s respawn cooldown.
+   * One ecosystem tick: grow if alive and not being/been eaten, or advance
+   * 300s respawn cooldown.
    * @param {object} plant
    * @param {function(number,number):{x:number,y:number}|null} findRespawnSpot
    */
   function updatePlant(plant, findRespawnSpot) {
     if (plant.alive) {
-      if (plant.calories < plant.maxCalories) {
+      // CRITICAL: once any animal starts eating, growth stops until respawn
+      if (!plant.growthPaused && plant.calories < plant.maxCalories) {
         plant.calories = Math.min(
           plant.maxCalories,
           plant.calories + plant.growthPerTick
@@ -169,6 +184,7 @@
     // Respawn at 50% max calories, then resume normal growth from there
     plant.calories = plant.maxCalories * RESPAWN_CALORIE_RATIO;
     plant.alive = true;
+    plant.growthPaused = false;
     plant.respawnTimer = 0;
     plant.sproutProgress = 0;
   }
@@ -183,7 +199,7 @@
   function relocateToLand(plant, world, maxRadius) {
     maxRadius = maxRadius == null ? 24 : maxRadius;
     const TILE_SIZE = world.TILE_SIZE || Wildborn.world.TILE_SIZE;
-    const mapTiles = world.MAP_TILES || Wildborn.world.MAP_TILES || 100;
+    const mapTiles = world.MAP_TILES || Wildborn.world.MAP_TILES || 200;
     const tx0 = Math.floor(plant.x / TILE_SIZE);
     const ty0 = Math.floor(plant.y / TILE_SIZE);
     for (let r = 0; r <= maxRadius; r++) {
@@ -216,6 +232,7 @@
     RESPAWN_CALORIE_RATIO,
     createPlant,
     pickSpecies,
+    pauseGrowth,
     consumePlant,
     updatePlant,
     relocateToLand,
