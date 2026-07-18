@@ -53,7 +53,6 @@
       attackPower: 2,
       color: '#c8c0b0',
       size: 8,
-      special: 'burrow',
       corpseYield: 0.5,
     },
     deer: {
@@ -69,7 +68,6 @@
       attackPower: 4,
       color: '#8a6238',
       size: 14,
-      special: 'alert',
       corpseYield: 0.5,
     },
     cow: {
@@ -86,8 +84,7 @@
       color: '#d8d0c0',
       accent: '#333',
       size: 18,
-      special: 'high_yield',
-      corpseYield: 0.7, // high calorie yield when eaten
+      corpseYield: 0.5,
     },
     raccoon: {
       id: 'raccoon',
@@ -102,7 +99,6 @@
       attackPower: 8,
       color: '#6a6a6a',
       size: 10,
-      special: 'steal',
       corpseYield: 0.5,
     },
     bison: {
@@ -118,7 +114,6 @@
       attackPower: 25,
       color: '#5a4030',
       size: 20,
-      special: 'group_charge',
       corpseYield: 0.55,
     },
     ostrich: {
@@ -134,7 +129,6 @@
       attackPower: 18,
       color: '#b09060',
       size: 16,
-      special: 'runs_from_all',
       corpseYield: 0.5,
     },
     turtle: {
@@ -146,14 +140,12 @@
       caloriesNeededPerDay: 40,
       maxCalories: 80,
       maxHealth: 150,
-      defense: 'shell',
+      defense: 'flee',
       attackPower: 2,
       color: '#3a6a3a',
       accent: '#2a4a2a',
       size: 11,
-      special: 'shell',
       corpseYield: 0.4,
-      damageReduction: 0.7, // very hard to kill
     },
     lizard: {
       id: 'lizard',
@@ -168,9 +160,7 @@
       attackPower: 3,
       color: '#5a9a4a',
       size: 7,
-      special: 'regen',
       corpseYield: 0.5,
-      regenPerTick: 0.4,
     },
   };
 
@@ -189,8 +179,6 @@
       attackPower: 22,
       color: '#7a7a88',
       size: 13,
-      special: 'howl',
-      packCallSeconds: 3,
       corpseYield: 0.5,
     },
     lion: {
@@ -206,7 +194,6 @@
       attackPower: 30,
       color: '#c9a045',
       size: 17,
-      special: 'female_hunt',
       corpseYield: 0.5,
     },
     panther: {
@@ -218,12 +205,10 @@
       caloriesNeededPerDay: 90,
       maxCalories: 180,
       maxHealth: 100,
-      attackStyle: 'stealth_pounce',
+      attackStyle: 'pounce',
       attackPower: 28,
       color: '#1a1a22',
       size: 14,
-      special: 'stealth',
-      stealthRevealDist: 120,
       corpseYield: 0.5,
     },
     bear: {
@@ -239,7 +224,6 @@
       attackPower: 40,
       color: '#4a3020',
       size: 20,
-      special: 'omnivore',
       corpseYield: 0.5,
     },
     alligator: {
@@ -256,7 +240,6 @@
       attackPower: 35,
       color: '#2a5a2a',
       size: 18,
-      special: 'ambush',
       corpseYield: 0.5,
     },
   };
@@ -293,13 +276,11 @@
   const EAT_PREDATOR_INTERRUPT_RANGE = 50;
   /** Plant sight / food detect: 8 tiles = 256px. Prey detect uses the same base. */
   const FOOD_DETECT_RANGE = PLANT_SIGHT_RANGE;
-  const PACK_JOIN_RANGE = 200;
-  const STEAL_RANGE = 24;
   /** Plant eating: 5 calories per second per animal (real-time in updateEating). Stacks. */
   const EAT_RATE_PER_SEC = 5;
   /** Predators burn 1 calorie every 10 seconds (flat rate for all predator species). */
   const PREDATOR_CALORIE_BURN_PER_SEC = 0.1;
-  /** Corpse / steal transfer rate (calories per ecosystem tick). */
+  /** Corpse transfer rate (calories per ecosystem tick). */
   const EAT_RATE = 6;
   const ATTACK_COOLDOWN_TICKS = 2;
   const IDLE_WANDER_CHANCE = 0.35;
@@ -308,7 +289,13 @@
 
   /** Predators hunt at ≤30% calories; return to roaming at ≥80%. */
   const PREDATOR_HUNT_RATIO = 0.3;
+  /** Omnivores skip the 30% hunt gate — actively hunt prey at ≤50% calories. */
+  const OMNIVORE_HUNT_RATIO = 0.5;
   const PREDATOR_SATIATED_RATIO = 0.8;
+  /** Omnivore prey search expands faster than herbivore plant search (tiles/sec). */
+  const OMNIVORE_SEARCH_EXPAND_TILES_PER_SEC = 5;
+  /** Omnivores start hunger/hunt search at 2× base detect range. */
+  const OMNIVORE_INITIAL_SEARCH_MULT = 2;
   /** Roam within this radius of spawn while not hunting. */
   const TERRITORY_RADIUS = 200;
   /** Flee desperation: cross water if predator within this distance. */
@@ -429,12 +416,7 @@
       attackPower: def.attackPower || 5,
       defense: def.defense || 'flee',
       attackStyle: def.attackStyle || null,
-      special: def.special || null,
       corpseYield: def.corpseYield != null ? def.corpseYield : 0.5,
-      damageReduction: def.damageReduction || 0,
-      regenPerTick: def.regenPerTick || 0,
-      stealthRevealDist: def.stealthRevealDist || 0,
-      packCallSeconds: def.packCallSeconds || 0,
 
       color: def.color,
       accent: def.accent || null,
@@ -442,9 +424,6 @@
       size: def.size,
 
       attackCooldown: 0,
-      packCallTimer: 0, // seconds remaining for pack to join
-      burrowed: false,
-      burrowTimer: 0,
       /** Seconds until next visual poop while roaming (predators). */
       poopTimer: isPred ? 5 + Math.random() * 5 : 0,
 
@@ -537,11 +516,41 @@
     return hungerRatio(a) <= HUNGER_SEEK_RATIO;
   }
 
+  /** Calories ratio at which an animal enters active prey hunting. */
+  function huntThreshold(animal) {
+    if (animal.diet === 'omnivore') return OMNIVORE_HUNT_RATIO;
+    return PREDATOR_HUNT_RATIO;
+  }
+
+  function initialSearchRadius(animal) {
+    if (animal.diet === 'omnivore') {
+      return FOOD_DETECT_RANGE * OMNIVORE_INITIAL_SEARCH_MULT;
+    }
+    return FOOD_DETECT_RANGE;
+  }
+
+  /** Begin map-wide prey hunt (omnivores at ≤50%, predators at ≤30%). */
+  function enterPreyHunt(animal) {
+    animal._hunting = true;
+    animal._hungerSearch = false;
+    animal.idleAccum = 0;
+    animal.target = null;
+    animal._searchRadius = initialSearchRadius(animal);
+    animal._spiralAngle = 0;
+    animal._spiralRadius = TILE_SIZE * 2;
+    animal._spiralOriginX = animal.x;
+    animal._spiralOriginY = animal.y;
+    if (animal.state !== AI_STATE.EATING) {
+      animal.state = AI_STATE.SEEK_PREY;
+    }
+    clearPath(animal);
+  }
+
   function enterHungerSearch(animal) {
     animal._hungerSearch = true;
     animal.idleAccum = 0;
     animal.target = null;
-    animal._searchRadius = FOOD_DETECT_RANGE;
+    animal._searchRadius = initialSearchRadius(animal);
     animal._spiralAngle = 0;
     animal._spiralRadius = TILE_SIZE * 2;
     animal._spiralOriginX = animal.x;
@@ -574,11 +583,11 @@
   function effectiveSpeed(animal, speedMult) {
     speedMult = speedMult == null ? 1 : speedMult;
     let speed = Math.max(MIN_SPEED, animal.baseSpeed * speedMult);
-    // Alligator: faster in water (still subject to the global water penalty below)
-    if (animal.special === 'ambush' && animal._inWater) {
-      speed = Math.max(MIN_SPEED, SPEED.fast);
+    // Species with waterSpeed (alligator): use that tier while in water before the global penalty
+    if (animal.waterSpeedKey && animal._inWater && SPEED[animal.waterSpeedKey]) {
+      speed = Math.max(MIN_SPEED, SPEED[animal.waterSpeedKey]);
     }
-    // Water: 25% of current speed (alligators still pay the water mult after land-equivalent)
+    // Water: 25% of current speed
     if (animal._inWater) {
       speed *= WATER_SPEED_MULT;
     }
@@ -586,11 +595,11 @@
   }
 
   /**
-   * True when the animal may enter water: fleeing a nearby predator, or starving
-   * with food across the water.
+   * True when the animal may enter water: aquatic species, fleeing a nearby
+   * predator, or starving with food across the water.
    */
   function canCrossWater(animal, ctx) {
-    if (animal.special === 'ambush') return true;
+    if (animal.waterSpeedKey) return true;
     if (animal.state === AI_STATE.FLEE && animal.fleeFrom && animal.fleeFrom.alive) {
       const d = Math.hypot(animal.x - animal.fleeFrom.x, animal.y - animal.fleeFrom.y);
       if (d <= WATER_DESPERATION_FLEE_DIST) return true;
@@ -703,8 +712,7 @@
       ctx &&
       ctx.isWater &&
       ctx.isWater(animal.x, animal.y) &&
-      !canCrossWater(animal, ctx) &&
-      animal.special !== 'ambush'
+      !canCrossWater(animal, ctx)
     ) {
       animal.x = prevX;
       animal.y = prevY;
@@ -764,27 +772,18 @@
 
   function applyDamage(target, amount, attacker) {
     if (!target.alive || target.state === AI_STATE.DEAD) return 0;
-    let dmg = amount;
-    if (target.damageReduction) dmg *= 1 - target.damageReduction;
-    if (target.burrowed) dmg *= 0.15;
-    if (target.defense === 'shell' && target.state === AI_STATE.FLEE) dmg *= 0.25;
+    const dmg = amount;
     target.health -= dmg;
     if (target.health <= 0) {
       killAnimal(target, attacker);
       return dmg;
     }
     // Defensive reactions
-    if (target.defense === 'flee' || target.special === 'runs_from_all' || target.special === 'burrow') {
+    if (target.defense === 'flee') {
       target.state = AI_STATE.FLEE;
       target.fleeFrom = attacker;
       target.stateTimer = 2.5;
       target._fleeExhausted = target.stamina <= 0;
-      if (target.special === 'burrow' && Math.random() < 0.4) {
-        target.burrowed = true;
-        target.burrowTimer = 3;
-      }
-      // Deer alert herd
-      if (target.special === 'alert') target._alertPulse = true;
     } else if (target.defense === 'fight' || target.defense === 'charge' || target.defense === 'kick') {
       target.state = AI_STATE.FLEE; // reuse flee state as "combat engage"
       target.fleeFrom = attacker;
@@ -838,21 +837,14 @@
   function updateAnimal(animal, dt, ctx) {
     if (animal.state === AI_STATE.DEAD) return;
 
-    if (animal.burrowed) {
-      animal.burrowTimer -= dt;
-      if (animal.burrowTimer <= 0) animal.burrowed = false;
-      return; // stay put while burrowed
-    }
-
     if (animal.attackCooldown > 0) animal.attackCooldown -= dt;
-    if (animal.packCallTimer > 0) animal.packCallTimer -= dt;
 
-    // Water flag for alligator
+    // Water flag for aquatic / water-crossing movement
     if (ctx.isWater) {
       animal._inWater = ctx.isWater(animal.x, animal.y);
     }
 
-    // Predator hunger gate: hunt only at ≤30%, roam above that until 80% after a hunt
+    // Predator/omnivore hunger gate: predators hunt ≤30%; omnivores hunt prey ≤50%
     if (isPredator(animal) && animal.diet !== 'herbivore' && animal.state !== AI_STATE.SLEEP) {
       updatePredatorHungerGate(animal);
     }
@@ -891,20 +883,26 @@
   /**
    * Predators: ROAM while calories > 50%; hunger-search at ≤50%;
    * enter SEEK_PREY hunt at ≤30%; stay hunting until calories ≥ 80%, then ROAM.
+   * Omnivores: no 30% hunt gate — enter active prey hunt at ≤50% calories.
    * Hunger-search (not full hunt) returns to ROAM at ≥60%.
    */
   function updatePredatorHungerGate(animal) {
     const ratio = hungerRatio(animal);
     if (animal.state === AI_STATE.DEAD || animal.state === AI_STATE.FLEE || animal.state === AI_STATE.SLEEP) return;
 
-    // Full hunt mode at ≤30% — takes priority over hunger-search
-    if (ratio <= PREDATOR_HUNT_RATIO) {
-      animal._hunting = true;
-      if (animal._hungerSearch) clearHungerSearch(animal);
-      if (animal.state !== AI_STATE.EATING) {
-        animal.state = AI_STATE.SEEK_PREY;
-        if (!animal.target) animal.target = null;
-      }
+    const threshold = huntThreshold(animal);
+
+    // Omnivores: at ≤50% immediately hunt prey map-wide (no intermediate hunger-search)
+    if (animal.diet === 'omnivore' && ratio <= threshold) {
+      if (!animal._hunting) enterPreyHunt(animal);
+      else if (animal.state !== AI_STATE.EATING) animal.state = AI_STATE.SEEK_PREY;
+      return;
+    }
+
+    // Pure predators: full hunt mode at ≤30%
+    if (animal.diet !== 'omnivore' && ratio <= threshold) {
+      if (!animal._hunting) enterPreyHunt(animal);
+      else if (animal.state !== AI_STATE.EATING) animal.state = AI_STATE.SEEK_PREY;
       return;
     }
 
@@ -920,7 +918,13 @@
       return;
     }
 
-    // Hunger-search band (30%–50%]: seek food, return at ≥60%
+    // Predator hunger-search band (30%–50%]: seek food, return at ≥60%
+    // Omnivores never use this band — they hunt at 50%.
+    if (animal.diet === 'omnivore') {
+      if (animal.state === AI_STATE.IDLE) animal.state = AI_STATE.ROAM;
+      return;
+    }
+
     if (animal._hungerSearch || animal.state === AI_STATE.SEEK_FOOD || animal.state === AI_STATE.EATING) {
       if (animal._hungerSearch && ratio >= HUNGER_RETURN_RATIO && animal.state !== AI_STATE.EATING) {
         clearHungerSearch(animal);
@@ -978,17 +982,18 @@
 
   function updateRoam(animal, dt, ctx) {
     // Drop into hunt immediately if calories crossed the threshold mid-frame
-    if (hungerRatio(animal) <= PREDATOR_HUNT_RATIO) {
-      animal.idleAccum = 0;
-      animal.state = AI_STATE.SEEK_PREY;
-      animal.target = null;
-      animal._hunting = true;
-      clearHungerSearch(animal);
+    if (hungerRatio(animal) <= huntThreshold(animal)) {
+      enterPreyHunt(animal);
       return;
     }
 
-    // Hunger-search at ≤50% — leave territory roaming
-    if (hungerRatio(animal) <= HUNGER_SEEK_RATIO && !animal._hunting) {
+    // Predators: hunger-search at ≤50% — leave territory roaming
+    // Omnivores already hunt at 50%, so they skip this band.
+    if (
+      animal.diet !== 'omnivore' &&
+      hungerRatio(animal) <= HUNGER_SEEK_RATIO &&
+      !animal._hunting
+    ) {
       enterHungerSearch(animal);
       return;
     }
@@ -1029,8 +1034,8 @@
       return;
     }
 
-    // Threat scan (herbivores / ostriches)
-    if (isHerbivore(animal) || animal.special === 'runs_from_all') {
+    // Threat scan (herbivores)
+    if (animal.diet === 'herbivore') {
       const threat = ctx.findNearestAnimal(
         animal.x,
         animal.y,
@@ -1039,13 +1044,12 @@
           return o.alive && isPredator(o) && o.diet !== 'herbivore' && o.id !== animal.id;
         }
       );
-      if (threat && animal.diet === 'herbivore') {
+      if (threat) {
         animal.idleAccum = 0;
         animal.state = AI_STATE.FLEE;
         animal.fleeFrom = threat;
         animal.stateTimer = 2.5;
         animal._fleeExhausted = animal.stamina <= 0;
-        if (animal.special === 'alert') animal._alertPulse = true;
         return;
       }
     }
@@ -1181,19 +1185,22 @@
   }
 
   function updateSeekFood(animal, dt, ctx) {
-    // Hunger-search: expand detect radius (herbivores) or spiral (predators)
-    if (animal._hungerSearch && !animal._hunting) {
+    // Expand detect radius while hunger-searching or while an omnivore is hunting prey
+    if (
+      (animal._hungerSearch && !animal._hunting) ||
+      (animal.diet === 'omnivore' && animal._hunting)
+    ) {
       updateHungerSearchMovement(animal, dt, ctx);
     }
 
-    // Predators seek herbivores (or corpses); herbivores seek plants; bears do both
+    // Predators seek herbivores (or corpses); herbivores seek plants; omnivores do both
     if (!animal.target || !isValidFoodTarget(animal, animal.target)) {
       animal.target = findFoodTarget(animal, ctx);
     }
 
     if (!animal.target) {
       if (animal._hungerSearch && !animal._hunting) {
-        // Herbivores keep expanding; predators spiral (handled above / below)
+        // Herbivores keep expanding; predators spiral
         if (isPredator(animal) && animal.diet !== 'herbivore') {
           updateSpiralSearch(animal, dt, ctx);
         } else {
@@ -1201,11 +1208,13 @@
         }
         return;
       }
-      wander(animal, dt, ctx.rng, ctx);
       if (isPredator(animal) && animal._hunting) {
-        // Keep hunting until satiated even if no prey nearby
+        // Keep hunting until satiated — omnivores spiral across more of the map
+        if (animal.diet === 'omnivore') updateSpiralSearch(animal, dt, ctx);
+        else wander(animal, dt, ctx.rng, ctx);
         return;
       }
+      wander(animal, dt, ctx.rng, ctx);
       if (!isHungry(animal) && hungerRatio(animal) >= HUNGER_RETURN_RATIO) {
         clearHungerSearch(animal);
         animal.state = defaultRestState(animal);
@@ -1226,35 +1235,22 @@
       return;
     }
 
-    // Pack call for wolves when chasing
-    if (animal.special === 'howl' && animal.packCallTimer <= 0 && t.kind === 'animal' && t.alive) {
-      animal.packCallTimer = animal.packCallSeconds || 3;
-      animal._howlPulse = true;
-    }
-    // Lion roar cue when engaging prey (visual + brief pack awareness)
-    if (
-      animal.special === 'female_hunt' &&
-      animal.packCallTimer <= 0 &&
-      t.kind === 'animal' &&
-      t.alive
-    ) {
-      animal.packCallTimer = 1.2;
-    }
-
-    // Pathfind with no max range — hunger-search may cross the whole map
+    // Pathfind with no max range — hunger/hunt search may cross the whole map
     moveToward(animal, t.x, t.y, dt, 1, ctx);
   }
 
   /**
    * Herbivores: grow search radius +2 tiles/sec when nothing in sight.
+   * Omnivores: grow faster (+5 tiles/sec) while hunting / hunger-searching for prey.
    * Predators: spiral is applied when still targetless (see updateSeekFood).
    */
   function updateHungerSearchMovement(animal, dt, ctx) {
     if (animal.diet === 'herbivore' || animal.diet === 'omnivore') {
       const cap = mapSearchCap(ctx);
-      const prev = animal._searchRadius || FOOD_DETECT_RANGE;
-      // Expand by 2 tiles per second until map edge coverage
-      animal._searchRadius = Math.min(cap, prev + 2 * TILE_SIZE * dt);
+      const prev = animal._searchRadius || initialSearchRadius(animal);
+      const tilesPerSec =
+        animal.diet === 'omnivore' ? OMNIVORE_SEARCH_EXPAND_TILES_PER_SEC : 2;
+      animal._searchRadius = Math.min(cap, prev + tilesPerSec * TILE_SIZE * dt);
     }
   }
 
@@ -1290,17 +1286,19 @@
       if (isPredator(animal) && t.diet === 'herbivore') return true;
       // Desperate predators fight other predators
       if (isPredator(animal) && isPredator(t) && isHungry(animal) && t.id !== animal.id) return true;
-      // Raccoon steals — target other animals with calories
-      if (animal.special === 'steal' && t.id !== animal.id && t.calories > 5) return true;
       return false;
     }
     return false;
   }
 
   function foodDetectRange(animal) {
+    // Omnivores use an expanding map-wide radius while hunting or hunger-searching
+    if (animal.diet === 'omnivore' && (animal._hunting || animal._hungerSearch)) {
+      return animal._searchRadius || initialSearchRadius(animal);
+    }
     if (animal._hungerSearch && !animal._hunting) {
       // Herbivores: expanding radius; predators: sight only (spiral explores)
-      if (animal.diet === 'herbivore' || animal.diet === 'omnivore') {
+      if (animal.diet === 'herbivore') {
         return animal._searchRadius || FOOD_DETECT_RANGE;
       }
       return FOOD_DETECT_RANGE;
@@ -1331,16 +1329,6 @@
       (animal.diet === 'omnivore' && (animal._hunting || animal._hungerSearch || isHungry(animal))) ||
       (animal._hungerSearch && isPredator(animal))
     ) {
-      // Lion females do most hunting (males only when hungrier), unless already in hunt/search
-      if (
-        animal.special === 'female_hunt' &&
-        animal.sex === 'male' &&
-        hungerRatio(animal) > 0.25 &&
-        !animal._hunting &&
-        !animal._hungerSearch
-      ) {
-        // Males hunt only when hungrier
-      } else {
       const prey = ctx.findNearestAnimal(
         animal.x,
         animal.y,
@@ -1363,23 +1351,9 @@
         );
         if (rival) return rival;
       }
-      }
     }
 
     if (animal.diet === 'herbivore' || animal.diet === 'omnivore') {
-      // Raccoon steal attempt
-      if (animal.special === 'steal' && ctx.rng.chance(0.3)) {
-        const victim = ctx.findNearestAnimal(
-          animal.x,
-          animal.y,
-          detect * 0.5,
-          function (o) {
-            return o.alive && o.id !== animal.id && o.calories > 10;
-          }
-        );
-        if (victim) return victim;
-      }
-
       const plant = ctx.findNearestPlant(
         animal.x,
         animal.y,
@@ -1397,51 +1371,7 @@
   function tryAttack(attacker, prey, ctx) {
     if (attacker.attackCooldown > 0) return;
 
-    // Pack join: nearby packmates with same species join
-    if (attacker._howlPulse || attacker.special === 'howl') {
-      attacker._howlPulse = false;
-      const pack = ctx.queryAnimals(attacker.x, attacker.y, PACK_JOIN_RANGE);
-      for (let i = 0; i < pack.length; i++) {
-        const m = pack[i];
-        if (
-          m.alive &&
-          m.species === attacker.species &&
-          m.id !== attacker.id &&
-          m.state !== AI_STATE.DEAD
-        ) {
-          m.target = prey;
-          m.state = AI_STATE.SEEK_PREY;
-          m._hunting = true;
-          m.packCallTimer = attacker.packCallSeconds || 3;
-        }
-      }
-    }
-
-    // Bison group charge
-    if (prey._counterAttack && prey.special === 'group_charge') {
-      const herd = ctx.queryAnimals(prey.x, prey.y, PACK_JOIN_RANGE);
-      for (let i = 0; i < herd.length; i++) {
-        const m = herd[i];
-        if (m.alive && m.species === prey.species && m.id !== prey.id) {
-          m.target = attacker;
-          m.state = AI_STATE.FLEE;
-          m._counterAttack = true;
-          m.fleeFrom = attacker;
-        }
-      }
-    }
-
-    let power = attacker.attackPower;
-    // Stealth pounce bonus
-    if (attacker.special === 'stealth' || attacker.attackStyle === 'stealth_pounce') {
-      power *= 1.35;
-    }
-    // Death roll bonus in water
-    if (attacker.special === 'ambush' && attacker._inWater) {
-      power *= 1.5;
-    }
-
-    applyDamage(prey, power, attacker);
+    applyDamage(prey, attacker.attackPower, attacker);
     attacker.attackCooldown = ATTACK_COOLDOWN_TICKS * (ctx.tickSeconds || 0.5);
 
     // Counter-attack
@@ -1512,7 +1442,6 @@
     animal.fleeFrom = threat;
     animal.stateTimer = 2.5;
     animal._fleeExhausted = animal.stamina <= 0;
-    if (animal.special === 'alert') animal._alertPulse = true;
   }
 
   function updateEating(animal, dt, ctx) {
@@ -1553,7 +1482,7 @@
       !animal._hunting &&
       hungerRatio(animal) >= HUNGER_RETURN_RATIO
     ) {
-      // Non-plant food (corpse / steal): keep prior hunger-return satiation
+      // Non-plant food (corpse): keep prior hunger-return satiation
       animal.target = null;
       clearEatingVisuals(animal);
       clearPath(animal);
@@ -1583,26 +1512,6 @@
     // Face the food
     if (t.x >= animal.x) animal._facingRight = true;
     else animal._facingRight = false;
-
-    // Raccoon steal from live animal
-    if (animal.special === 'steal' && t.kind === 'animal' && t.alive && t.state !== AI_STATE.DEAD) {
-      animal.eatLocked = false;
-      const stolen = Math.min(
-        EAT_RATE_PER_SEC * 2 * dt,
-        t.calories * 0.05,
-        animal.maxCalories - animal.calories
-      );
-      if (stolen > 0) {
-        t.calories -= stolen;
-        animal.calories += stolen;
-      }
-      if (animal.calories >= animal.maxCalories * 0.95 || t.calories < 5) {
-        animal.state = defaultRestState(animal);
-        animal.target = null;
-        clearEatingVisuals(animal);
-      }
-      return;
-    }
 
     // Plants: continuous 5 cal/sec — stubborn commit until full / depleted / predator.
     // Multiple eaters stack (3 animals → 15 cal/sec from the plant).
@@ -1694,26 +1603,12 @@
       const dx = animal.x - threat.x;
       const dy = animal.y - threat.y;
       const len = Math.hypot(dx, dy) || 1;
-      const runMult = animal.special === 'runs_from_all' ? 1.3 : 1.15;
+      const runMult = 1.15;
       // Exhausted: walk at half max flee speed
       const speedMult = animal._fleeExhausted ? runMult * 0.5 : runMult;
       const tx = animal.x + (dx / len) * 80;
       const ty = animal.y + (dy / len) * 80;
       moveToward(animal, tx, ty, dt, speedMult, ctx);
-
-      if (animal._alertPulse) {
-        animal._alertPulse = false;
-        const herd = ctx.queryAnimals(animal.x, animal.y, FLEE_DETECT_RANGE);
-        for (let i = 0; i < herd.length; i++) {
-          const m = herd[i];
-          if (m.alive && m.species === animal.species && m.id !== animal.id) {
-            m.state = AI_STATE.FLEE;
-            m.fleeFrom = threat;
-            m.stateTimer = 2.5;
-            m._fleeExhausted = m.stamina <= 0;
-          }
-        }
-      }
       return;
     }
 
@@ -1727,7 +1622,7 @@
     const dx = animal.x - threat.x;
     const dy = animal.y - threat.y;
     const len = Math.hypot(dx, dy) || 1;
-    const fleeSpeed = animal.special === 'runs_from_all' ? 1.3 : 1.15;
+    const fleeSpeed = 1.15;
     const tx = animal.x + (dx / len) * 80;
     const ty = animal.y + (dy / len) * 80;
     moveToward(animal, tx, ty, dt, fleeSpeed, ctx);
@@ -1810,11 +1705,6 @@
     updateStamina(animal);
 
     if (animal.breedingCooldown > 0) animal.breedingCooldown -= 1;
-
-    // Lizard regen
-    if (animal.regenPerTick && animal.health < animal.maxHealth) {
-      animal.health = Math.min(animal.maxHealth, animal.health + animal.regenPerTick);
-    }
 
     // Sleep: random wake chance after minimum nap
     if (
@@ -1919,6 +1809,7 @@
     MIN_CALORIE_BURN,
     PREDATOR_CALORIE_BURN_PER_SEC,
     PREDATOR_HUNT_RATIO,
+    OMNIVORE_HUNT_RATIO,
     PREDATOR_SATIATED_RATIO,
     TERRITORY_RADIUS,
     STAMINA_MAX,

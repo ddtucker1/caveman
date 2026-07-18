@@ -156,7 +156,11 @@ function assert(cond, msg) {
   assert(rabbit.diet === 'herbivore' && rabbit.maxCalories === 60, 'rabbit herbivore stats');
   assert(rabbit.stamina === 100 && rabbit.maxStamina === 100, 'animals spawn with full stamina');
   const wolf = Wildborn.animal.createAnimal('wolf', 0, 0);
-  assert(wolf.diet === 'predator' && wolf.special === 'howl', 'wolf predator stats');
+  assert(wolf.diet === 'predator' && wolf.attackPower === 22, 'wolf predator stats');
+  assert(wolf.special == null, 'animals have no special abilities');
+  const bear = Wildborn.animal.createAnimal('bear', 0, 0);
+  assert(bear.diet === 'omnivore', 'bear is omnivore');
+  assert(Wildborn.animal.OMNIVORE_HUNT_RATIO === 0.5, 'omnivores hunt at 50% calories');
   assert(wolf.state === 'ROAM', 'predators spawn in ROAM state');
   assert(wolf.spawnX === 0 && wolf.spawnY === 0, 'predator records spawn territory point');
   const cub = Wildborn.animal.createAnimal('deer', 0, 0, { isOffspring: true });
@@ -500,6 +504,20 @@ function assert(cond, msg) {
   wolf._hunting = true;
   Wildborn.animal.updateAnimal(wolf, 0.1, ctx);
   assert(wolf.state === 'ROAM' && !wolf._hunting, 'predator returns to ROAM at ≥80%');
+
+  // Omnivores: no 30% hunt gate — hunt prey at ≤50% with expanded search
+  const bear = Wildborn.animal.createAnimal('bear', 100, 100);
+  bear.calories = bear.maxCalories * 0.5;
+  bear.state = 'ROAM';
+  Wildborn.animal.updateAnimal(bear, 0.1, ctx);
+  assert(bear.state === 'SEEK_PREY' && bear._hunting, 'omnivore enters SEEK_PREY at ≤50%');
+  assert(
+    bear._searchRadius >= Wildborn.animal.FOOD_DETECT_RANGE * 2,
+    'omnivore starts with wider map search radius'
+  );
+  const prevRadius = bear._searchRadius;
+  Wildborn.animal.updateAnimal(bear, 1, ctx);
+  assert(bear._searchRadius > prevRadius, 'omnivore expands prey search across the map');
 }
 
 // --- Unit: shape defs cover every species + renderShape is callable ---
