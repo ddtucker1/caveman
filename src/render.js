@@ -120,6 +120,7 @@
       ctx.lineTo(sx + 18, sy + 20);
       ctx.lineTo(sx + 6, sy + 22);
       ctx.fill();
+    }
   }
 
   function drawRock(ctx, x, y, terrain, seed) {
