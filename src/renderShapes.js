@@ -137,6 +137,17 @@
       drawZzzParticles(ctx, x, y - sz * 0.5, opts.zzzParticles, time);
     }
 
+    // Locked-in eating indicator — small yellow dot above head
+    if (opts.eatLocked && (state === 'EATING' || opts.eating) && state !== 'DEAD') {
+      ctx.fillStyle = '#f0d030';
+      ctx.beginPath();
+      ctx.arc(x, y - sz * 0.78, 2.4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(80, 60, 0, 0.55)';
+      ctx.lineWidth = 0.8;
+      ctx.stroke();
+    }
+
     // Flee motion lines (screen space, behind facing)
     if (opts.fleeing && state !== 'DEAD') {
       drawMotionLines(ctx, x, y, facingRight, sz);
@@ -186,6 +197,15 @@
       headDip = bob * 4.5;
       oy += headDip * 0.4;
       rot = 0.18 * bob;
+
+      // Locked-in stubborn eating: brief head shake every 3 seconds
+      if (opts.eatLocked) {
+        const lockPhase =
+          opts.eatLockPhase != null ? opts.eatLockPhase : t % 3;
+        if (lockPhase < 0.35) {
+          rot += Math.sin((lockPhase / 0.35) * Math.PI * 4) * 0.22;
+        }
+      }
     }
 
     // Flee lean forward
