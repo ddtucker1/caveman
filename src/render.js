@@ -588,14 +588,6 @@
       (animal.state === 'SEEK_FOOD' || animal.state === 'SEEK_PREY') &&
       (Math.floor(time * 2) % 5 === 0);
     const sleeping = animal.alive && animal.state === 'SLEEP';
-    const pantThreshold =
-      (Wildborn.animal && Wildborn.animal.STAMINA_PANT_THRESHOLD) || 20;
-    const panting =
-      animal.alive &&
-      animal.diet === 'herbivore' &&
-      animal.state === 'FLEE' &&
-      !animal._counterAttack &&
-      (animal.stamina == null || animal.stamina < pantThreshold);
 
     // Eye look toward nearest threat (herbivore) or food/prey
     let lookX = face ? 0.5 : -0.5;
@@ -628,8 +620,6 @@
         state: animal.state,
         calories: animal.calories,
         maxCalories: animal.maxCalories,
-        stamina: animal.stamina != null ? animal.stamina : 100,
-        maxStamina: animal.maxStamina != null ? animal.maxStamina : 100,
         id: animal.id,
         sex: animal.sex,
         isAdult: animal.isAdult,
@@ -648,7 +638,6 @@
         sleeping: sleeping,
         sleepTilt: animal.sleepTilt || 0,
         zzzParticles: animal.zzzParticles || null,
-        panting: panting,
         inWater: !!animal._inWater,
         counterAttack: !!animal._counterAttack,
         lookX: lookX,
@@ -846,14 +835,6 @@
       name,
       cal + ' / ' + maxCal + ' cal',
     ];
-    if (entity.kind !== 'plant' && entity.stamina != null) {
-      lines.push(
-        Math.round(entity.stamina) +
-          ' / ' +
-          Math.round(entity.maxStamina != null ? entity.maxStamina : 100) +
-          ' stam'
-      );
-    }
     lines.push('State: ' + st);
 
     ctx.font = '12px monospace';

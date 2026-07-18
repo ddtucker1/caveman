@@ -27,15 +27,10 @@
     very_fast: 72.5,
   };
   const MIN_SPEED = 0.5;
-  /** Animals on water move at 50% of normal speed (stacks with other modifiers). */
+  /** Non-aquatic animals on water move at 50% of normal speed. */
   const WATER_SPEED_MULT = 0.5;
-  /**
-   * Aquatic predators (alligators) move at 2× land speed while in water.
-   * Turtles keep land speed in water — equally comfortable on both.
-   */
+  /** Alligators and turtles move at 2× land speed while in water. */
   const AQUATIC_WATER_SPEED_MULT = 2;
-  /** Turtle water speed relative to land (1 = enjoy water as much as land). */
-  const TURTLE_WATER_SPEED_MULT = 1;
   const TILE_SIZE = 32;
   /** Herbivores "see" plants within this many tiles (8 × 32 = 256px). */
   const PLANT_SIGHT_TILES = 8;
@@ -52,7 +47,7 @@
       label: 'Rabbit',
       diet: 'herbivore',
       maxGroupSize: 2,
-      speed: 'fast',
+      speed: 'medium',
       caloriesNeededPerDay: 30,
       maxCalories: 60,
       maxHealth: 30,
@@ -82,7 +77,7 @@
       label: 'Cow',
       diet: 'herbivore',
       maxGroupSize: 12,
-      speed: 'slow',
+      speed: 'medium',
       caloriesNeededPerDay: 150,
       maxCalories: 300,
       maxHealth: 120,
@@ -113,7 +108,7 @@
       label: 'Bison',
       diet: 'herbivore',
       maxGroupSize: 15,
-      speed: 'slow',
+      speed: 'medium',
       caloriesNeededPerDay: 200,
       maxCalories: 400,
       maxHealth: 200,
@@ -128,7 +123,7 @@
       label: 'Ostrich',
       diet: 'herbivore',
       maxGroupSize: 4,
-      speed: 'very_fast',
+      speed: 'medium',
       caloriesNeededPerDay: 70,
       maxCalories: 140,
       maxHealth: 80,
@@ -143,10 +138,8 @@
       label: 'Turtle',
       diet: 'herbivore',
       maxGroupSize: 1,
-      speed: 'very_slow',
+      speed: 'medium',
       aquatic: true,
-      /** Same speed on land and water — equally at home in both. */
-      waterSpeedMult: TURTLE_WATER_SPEED_MULT,
       caloriesNeededPerDay: 40,
       maxCalories: 80,
       maxHealth: 150,
@@ -162,7 +155,7 @@
       label: 'Lizard',
       diet: 'herbivore',
       maxGroupSize: 1,
-      speed: 'fast',
+      speed: 'medium',
       caloriesNeededPerDay: 20,
       maxCalories: 40,
       maxHealth: 25,
@@ -226,7 +219,7 @@
       label: 'Bear',
       diet: 'omnivore',
       maxGroupSize: 2,
-      speed: 'medium',
+      speed: 'fast',
       caloriesNeededPerDay: 250,
       maxCalories: 500,
       maxHealth: 220,
@@ -327,14 +320,6 @@
   const POOP_INTERVAL_MAX = 10;
   const POOP_FADE_SECONDS = 30;
 
-  /** Stamina — shared across all species. */
-  const STAMINA_MAX = 100;
-  const STAMINA_REGEN = 2;
-  const STAMINA_DRAIN_WALK = 0.5;
-  const STAMINA_DRAIN_FLEE = 3;
-  const STAMINA_DRAIN_HUNT = 2;
-  const STAMINA_PANT_THRESHOLD = 20;
-
   /** Sleep / nap. */
   const SLEEP_ENTER_RATIO = 0.9;
   const SLEEP_WAKE_RATIO = 0.7;
@@ -391,8 +376,6 @@
       caloriesNeededPerDay: def.caloriesNeededPerDay,
       health: def.maxHealth,
       maxHealth: def.maxHealth,
-      stamina: STAMINA_MAX,
-      maxStamina: STAMINA_MAX,
 
       /** Per-animal reproduction cooldown in ticks (persists with animal state). */
       breedingCooldown: isOffspring
@@ -414,8 +397,6 @@
       /** Zzz particle list for sleep visuals. */
       zzzParticles: [],
       _zzzSpawn: 0,
-      /** Herbivore flee exhausted (walk instead of run). */
-      _fleeExhausted: false,
       /** True while in hunger-search (≤50% calories, orange eyes). */
       _hungerSearch: false,
       /** Expanding plant detect radius while hunger-searching (herbivores). */
@@ -440,7 +421,7 @@
       /** Aquatic species cross water freely; waterSpeedMult controls swim vs land pace. */
       aquatic: !!(def.aquatic || def.waterSpeed),
       waterSpeedKey: def.waterSpeed || null,
-      /** Relative water speed (turtle=1 equal to land; alligator defaults to 2×). */
+      /** Relative water speed (alligator/turtle default to 2× land). */
       waterSpeedMult:
         def.waterSpeedMult != null
           ? def.waterSpeedMult
@@ -530,7 +511,6 @@
     animal.sleepTilt = 0;
     animal._zzzSpawn = 0;
     animal.zzzParticles = [];
-    animal._fleeExhausted = false;
     clearHungerSearch(animal);
   }
 
@@ -633,14 +613,13 @@
     speedMult = speedMult == null ? 1 : speedMult;
     let speed = Math.max(MIN_SPEED, animal.baseSpeed * speedMult);
     if (animal._inWater) {
-      // Aquatic: per-species water pace (turtle = land speed; alligator = 2×)
+      // Aquatic (alligator/turtle): 2× land pace; everyone else: half speed
       if (animal.aquatic) {
         speed = Math.max(
           MIN_SPEED,
           animal.baseSpeed * aquaticWaterSpeedMult(animal) * speedMult
         );
       } else {
-        // Land animals: 50% of current speed
         speed *= WATER_SPEED_MULT;
       }
     }
@@ -669,13 +648,6 @@
       return true;
     }
     return false;
-  }
-
-  /** Full base speed when stamina is maxed during hunger/hunt search. */
-  function hungerSearchSpeedMult(animal) {
-    const maxS = animal.maxStamina || STAMINA_MAX;
-    if (animal.stamina >= maxS) return 1;
-    return 0.55 + 0.45 * (animal.stamina / maxS);
   }
 
   /**
@@ -973,7 +945,6 @@
     // Predators never get scared of prey — keep attacking until the target is dead.
     if (isPredator(target) && target.diet !== 'herbivore') {
       target.fleeFrom = null;
-      target._fleeExhausted = false;
       target._counterAttack = false;
       if (attacker && attacker.alive && attacker.state !== AI_STATE.DEAD) {
         target.target = attacker;
@@ -989,7 +960,6 @@
       target.state = AI_STATE.FLEE;
       target.fleeFrom = attacker;
       target.stateTimer = 2.5;
-      target._fleeExhausted = target.stamina <= 0;
     } else if (target.defense === 'fight' || target.defense === 'charge' || target.defense === 'kick') {
       target.state = AI_STATE.FLEE; // reuse flee state as "combat engage"
       target.fleeFrom = attacker;
@@ -1259,7 +1229,6 @@
     animal.state = AI_STATE.FLEE;
     animal.fleeFrom = threat;
     animal.stateTimer = 2.5;
-    animal._fleeExhausted = animal.stamina <= 0;
   }
 
   function updateIdle(animal, dt, ctx) {
@@ -1449,10 +1418,7 @@
     }
 
     // Pathfind with no max range — hunger/hunt search may cross the whole map.
-    // Full stamina → max speed while chasing food during search/hunt.
-    const speedMult =
-      animal._hungerSearch || animal._hunting ? hungerSearchSpeedMult(animal) : 1;
-    moveToward(animal, t.x, t.y, dt, speedMult, ctx);
+    moveToward(animal, t.x, t.y, dt, 1, ctx);
   }
 
   /**
@@ -1470,7 +1436,7 @@
 
   /**
    * Travel to distant map waypoints while hunger-/hunt-searching.
-   * Full stamina → max speed; goals stay far from the current position.
+   * Goals stay far from the current position.
    */
   function updateMapExploreSearch(animal, dt, ctx) {
     const goal = animal._exploreGoal;
@@ -1485,7 +1451,7 @@
       clearPath(animal);
     }
     const g = animal._exploreGoal;
-    moveToward(animal, g.x, g.y, dt, hungerSearchSpeedMult(animal), ctx);
+    moveToward(animal, g.x, g.y, dt, 1, ctx);
   }
 
   /** @deprecated Kept for callers/tests — redirects to map-wide explore. */
@@ -1653,7 +1619,6 @@
     animal.state = AI_STATE.FLEE;
     animal.fleeFrom = threat;
     animal.stateTimer = 2.5;
-    animal._fleeExhausted = animal.stamina <= 0;
   }
 
   function updateEating(animal, dt, ctx) {
@@ -1774,7 +1739,6 @@
     if (isPredator(animal) && animal.diet !== 'herbivore') {
       const threat = animal.fleeFrom || animal.target;
       animal.fleeFrom = null;
-      animal._fleeExhausted = false;
       animal._counterAttack = false;
       if (threat && threat.alive && threat.state !== AI_STATE.DEAD) {
         animal.target = threat;
@@ -1805,32 +1769,26 @@
     const threat = animal.fleeFrom;
     if (!threat || !threat.alive) {
       animal.fleeFrom = null;
-      animal._fleeExhausted = false;
       animal.state = defaultRestState(animal);
       return;
     }
 
     const dist = Math.hypot(animal.x - threat.x, animal.y - threat.y);
 
-    // Herbivores: keep fleeing until predator is 200px+ away (stamina-gated speed)
+    // Herbivores: keep fleeing until predator is 200px+ away (normal speed)
     if (animal.diet === 'herbivore') {
       if (dist >= FLEE_SAFE_RANGE) {
         animal.fleeFrom = null;
-        animal._fleeExhausted = false;
         animal.state = AI_STATE.IDLE;
         return;
       }
-      if (animal.stamina <= 0) animal._fleeExhausted = true;
 
       const dx = animal.x - threat.x;
       const dy = animal.y - threat.y;
       const len = Math.hypot(dx, dy) || 1;
-      const runMult = 1.15;
-      // Exhausted: walk at half max flee speed
-      const speedMult = animal._fleeExhausted ? runMult * 0.5 : runMult;
       const tx = animal.x + (dx / len) * 80;
       const ty = animal.y + (dy / len) * 80;
-      moveToward(animal, tx, ty, dt, speedMult, ctx);
+      moveToward(animal, tx, ty, dt, 1, ctx);
       return;
     }
 
@@ -1844,62 +1802,14 @@
     const dx = animal.x - threat.x;
     const dy = animal.y - threat.y;
     const len = Math.hypot(dx, dy) || 1;
-    const fleeSpeed = 1.15;
     const tx = animal.x + (dx / len) * 80;
     const ty = animal.y + (dy / len) * 80;
-    moveToward(animal, tx, ty, dt, fleeSpeed, ctx);
+    moveToward(animal, tx, ty, dt, 1, ctx);
   }
 
   // ---------------------------------------------------------------------------
   // Discrete tick (hunger, eating calories, asexual reproduction)
   // ---------------------------------------------------------------------------
-
-  /**
-   * Per-tick stamina drain/regen based on activity.
-   * Walking/idle/eating/sleeping regenerate; flee/hunt drain.
-   */
-  function updateStamina(animal) {
-    let drain = 0;
-    let regen = 0;
-    const state = animal.state;
-    const speed = Math.hypot(animal.vx || 0, animal.vy || 0);
-    const moving = speed > 2;
-
-    if (state === AI_STATE.SLEEP || state === AI_STATE.EATING) {
-      regen = STAMINA_REGEN;
-      drain = 0;
-    } else if (state === AI_STATE.FLEE && animal.diet === 'herbivore') {
-      if (animal._fleeExhausted || animal.stamina <= 0) {
-        // Exhausted walk-away: walk rates
-        regen = STAMINA_REGEN;
-        drain = STAMINA_DRAIN_WALK;
-        animal._fleeExhausted = true;
-      } else {
-        // Full sprint flee — predators are exempt (herbivores only)
-        regen = 0;
-        drain = STAMINA_DRAIN_FLEE;
-      }
-    } else if (state === AI_STATE.SEEK_PREY || (state === AI_STATE.SEEK_FOOD && isPredator(animal) && animal._hunting)) {
-      regen = 0;
-      drain = STAMINA_DRAIN_HUNT;
-    } else if (state === AI_STATE.IDLE || state === AI_STATE.ROAM) {
-      regen = STAMINA_REGEN;
-      drain = moving ? STAMINA_DRAIN_WALK : 0;
-    } else if (state === AI_STATE.SEEK_FOOD) {
-      regen = STAMINA_REGEN;
-      drain = moving ? STAMINA_DRAIN_WALK : 0;
-    } else {
-      regen = STAMINA_REGEN;
-    }
-
-    animal.stamina = Math.max(
-      0,
-      Math.min(animal.maxStamina, animal.stamina + regen - drain)
-    );
-    if (animal.stamina <= 0 && state === AI_STATE.FLEE && animal.diet === 'herbivore') {
-      animal._fleeExhausted = true;
-    }
-  }
 
   /**
    * @param {object} animal
@@ -1923,8 +1833,6 @@
     let drain = calorieBurnPerTick(animal);
     if (animal.state === AI_STATE.SLEEP) drain *= 0.5;
     animal.calories -= drain;
-
-    updateStamina(animal);
 
     if (animal.breedingCooldown > 0) animal.breedingCooldown -= 1;
 
@@ -2030,12 +1938,6 @@
     OMNIVORE_HUNT_RATIO,
     PREDATOR_SATIATED_RATIO,
     TERRITORY_RADIUS,
-    STAMINA_MAX,
-    STAMINA_REGEN,
-    STAMINA_DRAIN_WALK,
-    STAMINA_DRAIN_FLEE,
-    STAMINA_DRAIN_HUNT,
-    STAMINA_PANT_THRESHOLD,
     FLEE_ENTER_RANGE,
     FLEE_SAFE_RANGE,
     EAT_PREDATOR_INTERRUPT_RANGE,
@@ -2046,7 +1948,6 @@
     EAT_RATE_PER_SEC,
     WATER_SPEED_MULT,
     AQUATIC_WATER_SPEED_MULT,
-    TURTLE_WATER_SPEED_MULT,
     WATER_STUCK_CROSS_SECONDS,
     HUNGER_EXPLORE_GOAL_MIN,
     HUNGER_EXPLORE_GOAL_MAX,
