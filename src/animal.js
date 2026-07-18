@@ -297,8 +297,10 @@
   const FOOD_DETECT_RANGE = PLANT_SIGHT_RANGE;
   const PACK_JOIN_RANGE = 200;
   const STEAL_RANGE = 24;
-  /** Plant eating: 1 calorie per second per animal (real-time in updateEating). */
-  const EAT_RATE_PER_SEC = 1;
+  /** Plant eating: 5 calories per second per animal (real-time in updateEating). Stacks. */
+  const EAT_RATE_PER_SEC = 5;
+  /** Predators burn 1 calorie every 10 seconds (flat rate for all predator species). */
+  const PREDATOR_CALORIE_BURN_PER_SEC = 0.1;
   /** Corpse / steal transfer rate (calories per ecosystem tick). */
   const EAT_RATE = 6;
   const ATTACK_COOLDOWN_TICKS = 2;
@@ -456,11 +458,20 @@
   }
 
   /**
-   * Per-tick calorie drain: (daily need / DAY_TICKS) / 10, rounded to 1 decimal.
+   * Per-tick calorie drain.
+   * Predators (wolf/lion/panther/bear/alligator): flat 0.1 cal/sec
+   *   → PREDATOR_CALORIE_BURN_PER_SEC × ecosystemTickSeconds per tick.
+   * Herbivores: (daily need / DAY_TICKS) / 10, rounded to 1 decimal.
    * Floor at MIN_CALORIE_BURN (0.5). Species whose scaled rate is below the floor
    * keep a 2-decimal scaled value so small animals are not forced to burn faster.
    */
   function calorieBurnPerTick(animal) {
+    // Flat predator burn — all PREDATOR_SPECIES (includes omnivore bear)
+    if (PREDATOR_SPECIES[animal.species]) {
+      const tickSec =
+        (Wildborn.config && Wildborn.config.ecosystemTickSeconds) || 0.5;
+      return PREDATOR_CALORIE_BURN_PER_SEC * tickSec;
+    }
     const raw = animal.caloriesNeededPerDay / DAY_TICKS / CALORIE_BURN_DIVISOR;
     const rounded = Math.round(raw * 10) / 10;
     if (rounded >= MIN_CALORIE_BURN) return rounded;
@@ -1606,7 +1617,8 @@
       return;
     }
 
-    // Plants: continuous 1 cal/sec — stubborn commit until full / depleted / predator.
+    // Plants: continuous 5 cal/sec — stubborn commit until full / depleted / predator.
+    // Multiple eaters stack (3 animals → 15 cal/sec from the plant).
     // Growth stops immediately once eating starts (until depleted + respawn).
     if (t.kind === 'plant' && t.alive) {
       if (Wildborn.plant.pauseGrowth) Wildborn.plant.pauseGrowth(t);
@@ -1802,7 +1814,7 @@
       return result;
     }
 
-    // Hunger drain: daily need / DAY_TICKS, then ÷10, min 0.5 cal/tick
+    // Hunger drain: predators flat 0.1 cal/s; herbivores daily need / DAY_TICKS ÷10
     // Sleeping: conservation mode — half burn
     let drain = calorieBurnPerTick(animal);
     if (animal.state === AI_STATE.SLEEP) drain *= 0.5;
@@ -1927,6 +1939,7 @@
     DAY_TICKS,
     CALORIE_BURN_DIVISOR,
     MIN_CALORIE_BURN,
+    PREDATOR_CALORIE_BURN_PER_SEC,
     PREDATOR_HUNT_RATIO,
     PREDATOR_SATIATED_RATIO,
     TERRITORY_RADIUS,
