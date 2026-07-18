@@ -563,6 +563,7 @@
         lookX: lookX,
         lookY: lookY,
         deadAge: deadAge,
+        hungrySearch: !!animal._hungerSearch && !animal._hunting,
       }
     );
 
@@ -705,25 +706,15 @@
   function stateLabel(entity) {
     if (entity.kind === 'plant') {
       if (!entity.alive) return 'Depleted';
-      if (entity.calories < entity.maxCalories * 0.3) return 'Hungry';
-      return 'Idle';
+      return 'Growing';
     }
     const s = entity.state;
     if (s === 'DEAD') return 'Dead';
     if (s === 'SLEEP') return 'Sleeping';
     if (s === 'EATING') return 'Eating';
     if (s === 'FLEE') return entity._counterAttack ? 'Attacking' : 'Fleeing';
-    if (s === 'SEEK_FOOD' || s === 'SEEK_PREY') {
-      if (
-        (entity.diet === 'predator' || entity.diet === 'omnivore') &&
-        entity.target &&
-        entity.target.kind === 'animal' &&
-        entity.target.alive
-      ) {
-        return 'Hunting';
-      }
-      return s === 'SEEK_PREY' ? 'Hunting' : 'Hungry';
-    }
+    if (s === 'SEEK_PREY' || entity._hunting) return 'Hunting';
+    if (s === 'SEEK_FOOD' || entity._hungerSearch) return 'Searching for Food';
     if (s === 'ROAM') return 'Roaming';
     if (s === 'IDLE') return 'Idle';
     return s || 'Idle';
@@ -738,16 +729,16 @@
     const worldX = camera.x + screenX;
     const worldY = camera.y + screenY;
     let best = null;
-    let bestD = 22 * 22;
+    let bestD = 28 * 28;
 
     const plants = ecosystem.plants;
     for (let i = 0; i < plants.length; i++) {
       const p = plants[i];
-      if (!p.alive) continue;
+      // Allow picking depleted plants (sprouts) for the inspector
       const dx = p.x - worldX;
       const dy = p.y - worldY;
       const d2 = dx * dx + dy * dy;
-      const r = (p.size || 10) * 0.7;
+      const r = (p.size || 10) * (p.alive ? 0.7 : 0.55);
       if (d2 < r * r && d2 < bestD) {
         bestD = d2;
         best = p;
