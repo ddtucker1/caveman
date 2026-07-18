@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Wildborn In-Game Snapshot</title>
+  <style>
+    * { margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #1a1f16; }
+    canvas { display: block; width: 100%; height: 100%; }
+  </style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <script src="../src/config.js"></script>
+  <script src="../src/rng.js"></script>
+  <script src="../src/world.js"></script>
+  <script src="../src/player.js"></script>
+  <script src="../src/camera.js"></script>
+  <script src="../src/spatial.js"></script>
+  <script src="../src/plant.js"></script>
+  <script src="../src/animal.js"></script>
+  <script src="../src/ecosystem.js"></script>
+  <script src="../src/shapes.js"></script>
+  <script src="../src/renderShapes.js"></script>
+  <script src="../src/render.js"></script>
+  <script>
+    // Auto-start a seeded world and freeze after a few seconds of sim for a screenshot.
+    Wildborn.config.ecosystemEnabled = true;
+    Wildborn.config.showLegend = true;
+
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const dpr = 1;
+    canvas.width = 1280;
+    canvas.height = 720;
+    canvas.style.width = '1280px';
+    canvas.style.height = '720px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    const seed = 'visual-clarity-42';
+    const rng = Wildborn.rng.createRng(seed);
+    const world = Wildborn.world.createWorld(seed);
+    const camera = Wildborn.camera.createCamera({ width: 1280, height: 720 });
+    world.ensureChunksInBounds(-500, -500, 500, 500);
+    const spawn = Wildborn.player.findSpawn(world);
+    const player = Wildborn.player.createPlayer(spawn);
+    const eco = Wildborn.ecosystem.createEcosystem({
+      world, rng, config: Wildborn.config, origin: { x: spawn.x, y: spawn.y },
+    });
+    Wildborn.camera.snapCamera(camera, player);
+
+    // Simulate ~8 seconds so animals spread and states diversify
+    for (let i = 0; i < 8 * 30; i++) eco.update(1 / 30);
+
+    const time = 8;
+    Wildborn.render.clear(ctx, 1280, 720);
+    Wildborn.render.drawWorld(ctx, world, camera, time);
+    Wildborn.render.drawEcosystem(ctx, eco, camera, {
+      time, showDebug: false, showHuntLines: false, hoverEntity: null,
+    });
+    Wildborn.render.drawPlayer(ctx, player, camera);
+    Wildborn.render.drawLegend(ctx, eco, eco.getDebugStats());
+    Wildborn.render.drawDebug(ctx, {
+      fps: 60, chunkCount: world.chunks.size,
+      playerTx: Math.floor(player.x / 32),
+      playerTy: Math.floor(player.y / 32),
+    });
+
+    // Marker for headless wait
+    document.title = 'READY';
+    window.__snapshotReady = true;
+  </script>
+</body>
+</html>

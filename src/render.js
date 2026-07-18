@@ -302,11 +302,14 @@
     ctx.restore();
   }
 
+  /** Visual multiplier — sprites draw larger than hitboxes for readability. */
+  const ENTITY_VISUAL_SCALE = 1.55;
+
   function drawPlantSprite(ctx, plant, camera, time) {
     const s = worldToScreen(camera, plant.x, plant.y);
     const shapeDef = Wildborn.shapes.getSpeciesDef(plant.species);
     const base = shapeDef ? shapeDef.size : plant.size;
-    const scale = plant.size / base;
+    const scale = (plant.size / base) * ENTITY_VISUAL_SCALE;
 
     Wildborn.renderShapes.renderShape(
       ctx,
@@ -329,7 +332,7 @@
     const s = worldToScreen(camera, animal.x, animal.y);
     const shapeDef = Wildborn.shapes.getSpeciesDef(animal.species);
     const base = shapeDef ? shapeDef.size : animal.baseSize || animal.size;
-    const scale = animal.size / base;
+    const scale = (animal.size / base) * ENTITY_VISUAL_SCALE;
 
     if (animal.burrowed) {
       ctx.fillStyle = 'rgba(80,60,40,0.5)';
@@ -516,7 +519,7 @@
       } else {
         // Mini icon
         ctx.save();
-        Wildborn.renderShapes.renderLegendIcon(ctx, row.id, x + pad + 10, ry + 8, 0.45);
+        Wildborn.renderShapes.renderLegendIcon(ctx, row.id, x + pad + 12, ry + 9, 0.65);
         ctx.restore();
         ctx.font = '11px monospace';
         ctx.fillStyle = '#e8e4d4';
