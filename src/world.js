@@ -41,6 +41,11 @@
     return tile === TILE.WATER;
   }
 
+  /** True if plants may spawn/grow here (green grass terrain). */
+  function isGrass(tile) {
+    return tile === TILE.GRASS || tile === TILE.DENSE_GRASS;
+  }
+
   /** Smooth value noise in [0, 1] — deterministic for a given seed. */
   function valueNoise2D(x, y, seedNumeric) {
     function hash(ix, iy) {
@@ -204,6 +209,7 @@
       unloadFarChunks,
       isSolid,
       isSlow,
+      isGrass,
     };
   }
 
@@ -214,6 +220,7 @@
     TILE_COLORS,
     isSolid,
     isSlow,
+    isGrass,
     createWorld,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

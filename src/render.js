@@ -146,33 +146,115 @@
     ctx.fill();
   }
 
-  /** Draw the player as a caveman-colored square with a stick. */
+  /**
+   * Draw the player as a detailed caveman (scaled hitbox + sprite).
+   * Head, messy hair, swinging arms/legs, optional wooden club.
+   */
   function drawPlayer(ctx, player, camera) {
     const screen = worldToScreen(camera, player.x, player.y);
-    const sx = screen.x;
-    const sy = screen.y;
+    const cx = screen.x + player.w / 2;
+    const cy = screen.y + player.h / 2;
+    const s = player.w; // 30 — 50% larger than original 20
+    const facing = player.facingX >= 0 ? 1 : -1;
+    const phase = player.walkPhase || 0;
+    const swing = Math.sin(phase) * 0.55;
+    const moving = Math.abs(player.vx) + Math.abs(player.vy) > 1;
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(facing, 1);
 
     // Shadow
-    ctx.fillStyle = 'rgba(0,0,0,0.12)';
+    ctx.fillStyle = 'rgba(0,0,0,0.16)';
     ctx.beginPath();
-    ctx.ellipse(sx + player.w / 2, sy + player.h - 2, player.w * 0.4, 3, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, s * 0.42, s * 0.32, 3.5, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.fillStyle = '#c4a06a';
-    ctx.fillRect(sx, sy, player.w, player.h);
-
-    ctx.fillStyle = '#a87848';
-    ctx.fillRect(sx + 3, sy + 2, player.w - 6, 6);
-
-    const cx = sx + player.w / 2;
-    const cy = sy + player.h / 2;
-    const stickLen = 16;
-    ctx.strokeStyle = '#6a4420';
-    ctx.lineWidth = 3;
+    // Legs (swing opposite to arms)
+    const legLen = s * 0.28;
+    ctx.strokeStyle = '#6a4428';
+    ctx.lineWidth = 2.2;
+    ctx.lineCap = 'round';
+    const legSwing = moving ? swing : 0;
     ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.lineTo(cx + player.facingX * stickLen, cy + player.facingY * stickLen);
+    ctx.moveTo(-s * 0.08, s * 0.08);
+    ctx.lineTo(-s * 0.1 - Math.sin(legSwing) * 4, s * 0.08 + legLen);
+    ctx.moveTo(s * 0.08, s * 0.08);
+    ctx.lineTo(s * 0.1 + Math.sin(legSwing) * 4, s * 0.08 + legLen);
     ctx.stroke();
+
+    // Body — brown/tan, slightly wider at shoulders
+    ctx.fillStyle = '#c4a06a';
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.22, -s * 0.08); // left shoulder
+    ctx.lineTo(s * 0.22, -s * 0.08); // right shoulder
+    ctx.lineTo(s * 0.16, s * 0.14); // right hip
+    ctx.lineTo(-s * 0.16, s * 0.14); // left hip
+    ctx.closePath();
+    ctx.fill();
+
+    // Arms (opposite swing to legs)
+    const armSwing = moving ? -swing : 0;
+    ctx.strokeStyle = '#b08958';
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.2, -s * 0.05);
+    ctx.lineTo(-s * 0.28 - Math.sin(armSwing) * 5, s * 0.12);
+    ctx.moveTo(s * 0.2, -s * 0.05);
+    ctx.lineTo(s * 0.28 + Math.sin(armSwing) * 5, s * 0.12);
+    ctx.stroke();
+
+    // Wooden club in forward hand
+    const handX = s * 0.28 + Math.sin(armSwing) * 5;
+    const handY = s * 0.12;
+    ctx.strokeStyle = '#6a4420';
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    ctx.moveTo(handX, handY);
+    ctx.lineTo(handX + s * 0.22, handY - s * 0.18);
+    ctx.stroke();
+    // Club tip nub
+    ctx.fillStyle = '#5a3818';
+    ctx.beginPath();
+    ctx.arc(handX + s * 0.22, handY - s * 0.18, 2.2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Head — round
+    const headR = s * 0.16;
+    const headY = -s * 0.22;
+    ctx.fillStyle = '#d4b08a';
+    ctx.beginPath();
+    ctx.arc(0, headY, headR, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Messy brown hair pixels on top
+    ctx.fillStyle = '#5a3a1a';
+    const hair = [
+      [-4, -headR - 1],
+      [-1, -headR - 3],
+      [2, -headR - 2],
+      [5, -headR - 1],
+      [-3, -headR + 1],
+      [3, -headR + 1],
+      [0, -headR - 4],
+    ];
+    for (let i = 0; i < hair.length; i++) {
+      ctx.fillRect(hair[i][0] - 1, headY + hair[i][1] - 1, 2.2, 2.2);
+    }
+
+    // Eyes — two small black dots
+    ctx.fillStyle = '#1a120c';
+    ctx.beginPath();
+    ctx.arc(-3.2, headY - 1, 1.15, 0, Math.PI * 2);
+    ctx.arc(3.2, headY - 1, 1.15, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Nose — one larger dot
+    ctx.beginPath();
+    ctx.arc(0.5, headY + 2.5, 1.6, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
   }
 
   function updateHud(player) {
@@ -234,6 +316,17 @@
       drawPlantSprite(ctx, p, camera, time);
     }
 
+    // Predator poop (visual only)
+    const poops = ecosystem.poops || [];
+    for (let i = 0; i < poops.length; i++) {
+      const p = poops[i];
+      if (p.x < x0 || p.x > x1 || p.y < y0 || p.y > y1) continue;
+      const s = worldToScreen(camera, p.x, p.y);
+      const alpha = Math.max(0, Math.min(1, p.life / (p.maxLife || 30)));
+      ctx.fillStyle = 'rgba(92, 58, 28, ' + (0.55 * alpha) + ')';
+      ctx.fillRect(s.x - 1, s.y - 1, 3, 3);
+    }
+
     const eggs = ecosystem.eggs;
     for (let i = 0; i < eggs.length; i++) {
       const e = eggs[i];
@@ -258,7 +351,7 @@
         if (a.x < x0 || a.x > x1 || a.y < y0 || a.y > y1) continue;
         const hunting =
           (a.diet === 'predator' || a.diet === 'omnivore') &&
-          a.state === 'SEEK_FOOD' &&
+          (a.state === 'SEEK_FOOD' || a.state === 'SEEK_PREY') &&
           a.target &&
           a.target.kind === 'animal' &&
           a.target.alive;
@@ -284,6 +377,17 @@
         if (dx * dx + dy * dy > reveal * reveal) continue;
       }
       drawAnimalSprite(ctx, a, camera, time, ecosystem);
+    }
+
+    // Water splash particles (white dots)
+    const splashes = ecosystem.splashes || [];
+    for (let i = 0; i < splashes.length; i++) {
+      const sp = splashes[i];
+      if (sp.x < x0 || sp.x > x1 || sp.y < y0 || sp.y > y1) continue;
+      const s = worldToScreen(camera, sp.x, sp.y);
+      const alpha = Math.max(0, Math.min(1, sp.life / (sp.maxLife || 0.5)));
+      ctx.fillStyle = 'rgba(240, 248, 255, ' + (0.85 * alpha) + ')';
+      ctx.fillRect(s.x - 1, s.y - 1, 2, 2);
     }
   }
 
@@ -352,11 +456,12 @@
     const face = animal._facingRight !== false;
 
     const speed = Math.hypot(animal.vx || 0, animal.vy || 0);
-    const moving = speed > 8;
+    // Threshold lowered with global speed halve (was 8)
+    const moving = speed > 4;
     const hunting =
       animal.alive &&
       (animal.diet === 'predator' || animal.diet === 'omnivore') &&
-      animal.state === 'SEEK_FOOD' &&
+      (animal.state === 'SEEK_FOOD' || animal.state === 'SEEK_PREY') &&
       animal.target &&
       animal.target.kind === 'animal' &&
       animal.target.alive;
@@ -373,12 +478,12 @@
       animal.species === 'bear' &&
       hunting &&
       animal.stateTimer != null &&
-      animal.state === 'SEEK_FOOD' &&
+      (animal.state === 'SEEK_FOOD' || animal.state === 'SEEK_PREY') &&
       (Math.floor(time * 2) % 5 === 0);
     const sleeping =
       animal.alive &&
       (animal.diet === 'predator' || animal.diet === 'omnivore') &&
-      animal.state === 'IDLE' &&
+      (animal.state === 'IDLE' || animal.state === 'ROAM') &&
       !moving &&
       animal.calories > animal.maxCalories * 0.7;
 
@@ -550,7 +655,7 @@
     if (s === 'EATING') return 'Eating';
     if (s === 'FLEE') return entity._counterAttack ? 'Attacking' : 'Fleeing';
     if (s === 'BREEDING' || s === 'SEEK_MATE') return 'Breeding';
-    if (s === 'SEEK_FOOD') {
+    if (s === 'SEEK_FOOD' || s === 'SEEK_PREY') {
       if (
         (entity.diet === 'predator' || entity.diet === 'omnivore') &&
         entity.target &&
@@ -559,7 +664,12 @@
       ) {
         return 'Hunting';
       }
-      return 'Hungry';
+      return s === 'SEEK_PREY' ? 'Hunting' : 'Hungry';
+    }
+    if (s === 'ROAM') {
+      const speed = Math.hypot(entity.vx || 0, entity.vy || 0);
+      if (speed < 8 && entity.calories > entity.maxCalories * 0.7) return 'Sleeping';
+      return 'Roaming';
     }
     if (s === 'IDLE') {
       const speed = Math.hypot(entity.vx || 0, entity.vy || 0);
