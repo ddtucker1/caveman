@@ -82,6 +82,11 @@
       player.y = nextY;
     }
 
+    // Hard clamp to the fixed 100×100 map edges
+    const mapPx = world.MAP_PIXEL_SIZE || Wildborn.world.MAP_PIXEL_SIZE || 3200;
+    player.x = Math.max(0, Math.min(mapPx - player.w, player.x));
+    player.y = Math.max(0, Math.min(mapPx - player.h, player.y));
+
     player.vx = dx * speed;
     player.vy = dy * speed;
 
@@ -112,24 +117,33 @@
     return false;
   }
 
-  /** Find a walkable spawn near world origin. */
+  /** Find a walkable spawn near the center of the fixed 100×100 map. */
   function findSpawn(world, maxRadius) {
-    maxRadius = maxRadius == null ? 40 : maxRadius;
+    const mapTiles = world.MAP_TILES || Wildborn.world.MAP_TILES || 100;
+    const cx = Math.floor(mapTiles / 2);
+    const cy = Math.floor(mapTiles / 2);
+    maxRadius = maxRadius == null ? mapTiles : maxRadius;
     for (let r = 0; r < maxRadius; r++) {
       for (let dy = -r; dy <= r; dy++) {
         for (let dx = -r; dx <= r; dx++) {
           if (Math.abs(dx) !== r && Math.abs(dy) !== r && r > 0) continue;
-          const tile = world.getTile(dx, dy);
-          if (!world.isSolid(tile) && !world.isSlow(tile)) {
+          const tx = cx + dx;
+          const ty = cy + dy;
+          if (tx < 0 || ty < 0 || tx >= mapTiles || ty >= mapTiles) continue;
+          const tile = world.getTile(tx, ty);
+          if (world.isLand ? world.isLand(tile) : !world.isSolid(tile) && !world.isSlow(tile)) {
             return {
-              x: dx * TILE_SIZE + (TILE_SIZE - PLAYER_SIZE) / 2,
-              y: dy * TILE_SIZE + (TILE_SIZE - PLAYER_SIZE) / 2,
+              x: tx * TILE_SIZE + (TILE_SIZE - PLAYER_SIZE) / 2,
+              y: ty * TILE_SIZE + (TILE_SIZE - PLAYER_SIZE) / 2,
             };
           }
         }
       }
     }
-    return { x: 0, y: 0 };
+    return {
+      x: cx * TILE_SIZE + (TILE_SIZE - PLAYER_SIZE) / 2,
+      y: cy * TILE_SIZE + (TILE_SIZE - PLAYER_SIZE) / 2,
+    };
   }
 
   Wildborn.player = { createPlayer, updatePlayer, findSpawn, PLAYER_SIZE };

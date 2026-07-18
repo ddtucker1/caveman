@@ -19,13 +19,14 @@
     ctx.fillRect(0, 0, w, h);
   }
 
-  /** Draw all tiles currently visible through the camera. */
+  /** Draw all tiles currently visible through the camera (clamped to map). */
   function drawWorld(ctx, world, camera, time) {
     time = time || 0;
-    const tx0 = Math.floor(camera.x / TILE_SIZE);
-    const ty0 = Math.floor(camera.y / TILE_SIZE);
-    const tx1 = Math.ceil((camera.x + camera.width) / TILE_SIZE);
-    const ty1 = Math.ceil((camera.y + camera.height) / TILE_SIZE);
+    const mapTiles = world.MAP_TILES || Wildborn.world.MAP_TILES || 100;
+    const tx0 = Math.max(0, Math.floor(camera.x / TILE_SIZE));
+    const ty0 = Math.max(0, Math.floor(camera.y / TILE_SIZE));
+    const tx1 = Math.min(mapTiles - 1, Math.ceil((camera.x + camera.width) / TILE_SIZE));
+    const ty1 = Math.min(mapTiles - 1, Math.ceil((camera.y + camera.height) / TILE_SIZE));
     const terrain = Wildborn.shapes.getShapeDefs().shared.terrain;
 
     for (let ty = ty0; ty <= ty1; ty++) {
@@ -311,8 +312,11 @@
     const plants = ecosystem.plants;
     for (let i = 0; i < plants.length; i++) {
       const p = plants[i];
-      if (!p.alive) continue;
       if (p.x < x0 || p.x > x1 || p.y < y0 || p.y > y1) continue;
+      if (!p.alive) {
+        drawPlantSprout(ctx, p, camera);
+        continue;
+      }
       drawPlantSprite(ctx, p, camera, time);
     }
 
@@ -417,6 +421,35 @@
     );
   }
 
+  /** Tiny sprout icon while a depleted plant waits 60s to respawn elsewhere. */
+  function drawPlantSprout(ctx, plant, camera) {
+    const s = worldToScreen(camera, plant.x, plant.y);
+    const progress = Math.max(0, Math.min(1, plant.sproutProgress || 0));
+    const h = 2 + progress * 8;
+    const w = 1 + progress * 3;
+
+    ctx.save();
+    ctx.translate(s.x, s.y);
+    // Stem
+    ctx.strokeStyle = 'rgba(70, 140, 50, ' + (0.45 + progress * 0.45) + ')';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, 2);
+    ctx.lineTo(0, 2 - h);
+    ctx.stroke();
+    // Leaves grow with progress
+    if (progress > 0.15) {
+      ctx.fillStyle = 'rgba(90, 170, 60, ' + (0.5 + progress * 0.5) + ')';
+      ctx.beginPath();
+      ctx.ellipse(-w * 0.6, 2 - h * 0.7, w, w * 0.55, -0.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(w * 0.6, 2 - h * 0.55, w * 0.85, w * 0.5, 0.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
   function drawAnimalSprite(ctx, animal, camera, time, ecosystem) {
     const s = worldToScreen(camera, animal.x, animal.y);
     const shapeDef = Wildborn.shapes.getSpeciesDef(animal.species);
@@ -518,6 +551,7 @@
         fleeing: fleeing,
         attacking: attacking,
         eating: animal.state === 'EATING',
+        eatBobPhase: animal.eatBobPhase || 0,
         roaring: roaring || lionRoar,
         rearUp: rearUp,
         sleeping: sleeping,
@@ -567,7 +601,7 @@
     const plantsMax =
       (stats && stats.plantsMax) ||
       (Wildborn.ecosystem && Wildborn.ecosystem.INITIAL_PLANT_COUNT) ||
-      2000;
+      150;
 
     const rows = [];
     rows.push({
@@ -783,12 +817,16 @@
 
     const lines = [];
     lines.push('ECOSYSTEM  tick ' + stats.tick);
-    const plantsMax = stats.plantsMax || Wildborn.ecosystem.INITIAL_PLANT_COUNT || 2000;
+    const plantsMax = stats.plantsMax || Wildborn.ecosystem.INITIAL_PLANT_COUNT || 150;
     lines.push(
       'Plants: ' + stats.plantsAlive + ' / ' + plantsMax +
+      (stats.plantsSprouting ? '  sprouts ' + stats.plantsSprouting : '') +
       '  avgCal ' + stats.plantAvgCalories +
       '  corpses ' + stats.corpses
     );
+    if (stats.mapTiles) {
+      lines.push('Map: ' + stats.mapTiles + '×' + stats.mapTiles + ' tiles');
+    }
     lines.push('Herbivores (' + stats.herbTotal + '):');
     for (const id in stats.herbivores) {
       const n = stats.herbivores[id];
@@ -829,6 +867,101 @@
     }
   }
 
+  /** Cached terrain bitmap for the full-map minimap (rebuilt per world seed). */
+  let _minimapTerrain = null;
+  let _minimapSeed = null;
+
+  function ensureMinimapTerrain(world) {
+    const mapTiles = world.MAP_TILES || Wildborn.world.MAP_TILES || 100;
+    if (_minimapTerrain && _minimapSeed === world.seedString) return _minimapTerrain;
+    const c = document.createElement('canvas');
+    c.width = mapTiles;
+    c.height = mapTiles;
+    const mctx = c.getContext('2d');
+    const img = mctx.createImageData(mapTiles, mapTiles);
+    const data = img.data;
+    for (let ty = 0; ty < mapTiles; ty++) {
+      for (let tx = 0; tx < mapTiles; tx++) {
+        const tile = world.getTile(tx, ty);
+        const hex = TILE_COLORS[tile] || '#333333';
+        const i = (ty * mapTiles + tx) * 4;
+        data[i] = parseInt(hex.slice(1, 3), 16);
+        data[i + 1] = parseInt(hex.slice(3, 5), 16);
+        data[i + 2] = parseInt(hex.slice(5, 7), 16);
+        data[i + 3] = 255;
+      }
+    }
+    mctx.putImageData(img, 0, 0);
+    _minimapTerrain = c;
+    _minimapSeed = world.seedString;
+    return c;
+  }
+
+  /**
+   * Minimap of the full 100×100 grid (bottom-right).
+   * Terrain sample + player / plant / animal dots.
+   */
+  function drawMinimap(ctx, world, player, ecosystem, viewW, viewH) {
+    const mapTiles = world.MAP_TILES || Wildborn.world.MAP_TILES || 100;
+    const mapPx = world.MAP_PIXEL_SIZE || mapTiles * TILE_SIZE;
+    const size = Math.min(160, Math.floor(Math.min(viewW, viewH) * 0.22));
+    const pad = 10;
+    const x = viewW - size - pad;
+    const y = viewH - size - pad;
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+    ctx.fillRect(x - 3, y - 3, size + 6, size + 6);
+    ctx.strokeStyle = 'rgba(220, 210, 160, 0.45)';
+    ctx.strokeRect(x - 3, y - 3, size + 6, size + 6);
+
+    const terrain = ensureMinimapTerrain(world);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(terrain, x, y, size, size);
+
+    if (ecosystem) {
+      // Plants (alive = green dots, sprouts = tiny dark)
+      const plants = ecosystem.plants;
+      for (let i = 0; i < plants.length; i++) {
+        const p = plants[i];
+        const px = x + (p.x / mapPx) * size;
+        const py = y + (p.y / mapPx) * size;
+        ctx.fillStyle = p.alive ? 'rgba(120, 220, 80, 0.85)' : 'rgba(60, 100, 40, 0.7)';
+        ctx.fillRect(px - 0.5, py - 0.5, 1.5, 1.5);
+      }
+      // Animals
+      const animals = ecosystem.animals;
+      for (let i = 0; i < animals.length; i++) {
+        const a = animals[i];
+        if (!a.alive || a.state === 'DEAD') continue;
+        const ax = x + (a.x / mapPx) * size;
+        const ay = y + (a.y / mapPx) * size;
+        const pred = a.diet === 'predator' || a.diet === 'omnivore';
+        ctx.fillStyle = pred ? 'rgba(220, 70, 60, 0.9)' : 'rgba(240, 230, 180, 0.85)';
+        ctx.fillRect(ax - 1, ay - 1, 2, 2);
+      }
+    }
+
+    // Player
+    if (player) {
+      const px = x + (player.x / mapPx) * size;
+      const py = y + (player.y / mapPx) * size;
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(px, py, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = 'rgba(232, 228, 212, 0.85)';
+    ctx.font = '10px monospace';
+    ctx.fillText(mapTiles + '×' + mapTiles, x + 4, y + 12);
+
+    ctx.restore();
+  }
+
   Wildborn.render = {
     clear,
     drawWorld,
@@ -837,6 +970,7 @@
     drawEcosystemDebug,
     drawLegend,
     drawTooltip,
+    drawMinimap,
     pickEntityAt,
     updateHud,
     setSeedDisplay,

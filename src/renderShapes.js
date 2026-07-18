@@ -168,11 +168,16 @@
       oy = Math.sin(t * 8 + speed) * Math.min(1.6, 0.8 + speed * 0.01);
     }
 
-    // Eating head dip
+    // Eating head bob toward plant — once per second
     if (state === 'EATING' || opts.eating) {
-      headDip = 2 + Math.sin(t * 10) * 1.5;
-      oy += headDip * 0.35;
-      rot = 0.12 * Math.sin(t * 10);
+      const phase =
+        opts.eatBobPhase != null ? opts.eatBobPhase : t - Math.floor(t);
+      // Sharp bob in the first ~0.35s of each second
+      const bob =
+        phase < 0.35 ? Math.sin((phase / 0.35) * Math.PI) : 0;
+      headDip = bob * 4.5;
+      oy += headDip * 0.4;
+      rot = 0.18 * bob;
     }
 
     // Flee lean forward

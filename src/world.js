@@ -19,6 +19,9 @@
 
   const TILE_SIZE = 32;
   const CHUNK_SIZE = 64; // 64x64 tiles per chunk
+  /** Fixed playable map: exactly 100×100 tiles → 3200×3200 pixels. */
+  const MAP_TILES = 100;
+  const MAP_PIXEL_SIZE = MAP_TILES * TILE_SIZE;
 
   /** Colors used by the renderer (simple shapes for now). */
   const TILE_COLORS = {
@@ -44,6 +47,27 @@
   /** True if plants may spawn/grow here (green grass terrain). */
   function isGrass(tile) {
     return tile === TILE.GRASS || tile === TILE.DENSE_GRASS;
+  }
+
+  /** Land for plants/animals: any non-water, non-rock (cliff/tree) tile. */
+  function isLand(tile) {
+    return !isSolid(tile) && !isSlow(tile);
+  }
+
+  function inMapTile(tx, ty) {
+    return tx >= 0 && ty >= 0 && tx < MAP_TILES && ty < MAP_TILES;
+  }
+
+  function inMapPixel(px, py) {
+    return px >= 0 && py >= 0 && px < MAP_PIXEL_SIZE && py < MAP_PIXEL_SIZE;
+  }
+
+  function clampPixelToMap(px, py, pad) {
+    pad = pad == null ? 0 : pad;
+    return {
+      x: Math.max(pad, Math.min(MAP_PIXEL_SIZE - pad, px)),
+      y: Math.max(pad, Math.min(MAP_PIXEL_SIZE - pad, py)),
+    };
   }
 
   /** Smooth value noise in [0, 1] — deterministic for a given seed. */
@@ -197,19 +221,31 @@
       }
     }
 
+    /** Preload every chunk that overlaps the fixed 100×100 map. */
+    function ensureMapLoaded() {
+      return ensureChunksInBounds(0, 0, MAP_PIXEL_SIZE - 1, MAP_PIXEL_SIZE - 1);
+    }
+
     return {
       seedString,
       TILE_SIZE,
       CHUNK_SIZE,
+      MAP_TILES,
+      MAP_PIXEL_SIZE,
       chunks,
       getTile,
       getTileAtPixel,
       ensureChunk,
       ensureChunksInBounds,
+      ensureMapLoaded,
       unloadFarChunks,
       isSolid,
       isSlow,
       isGrass,
+      isLand,
+      inMapTile,
+      inMapPixel,
+      clampPixelToMap,
     };
   }
 
@@ -217,10 +253,16 @@
     TILE,
     TILE_SIZE,
     CHUNK_SIZE,
+    MAP_TILES,
+    MAP_PIXEL_SIZE,
     TILE_COLORS,
     isSolid,
     isSlow,
     isGrass,
+    isLand,
+    inMapTile,
+    inMapPixel,
+    clampPixelToMap,
     createWorld,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

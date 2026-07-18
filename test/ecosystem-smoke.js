@@ -12,6 +12,7 @@ const files = [
   'src/rng.js',
   'src/world.js',
   'src/spatial.js',
+  'src/pathfind.js',
   'src/plant.js',
   'src/animal.js',
   'src/ecosystem.js',
@@ -26,10 +27,11 @@ for (const f of files) {
 }
 
 const { createRng } = Wildborn.rng;
-const { createWorld, TILE_SIZE } = Wildborn.world;
+const { createWorld, TILE_SIZE, MAP_TILES, MAP_PIXEL_SIZE } = Wildborn.world;
 const { createEcosystem, INITIAL_PLANT_COUNT } = Wildborn.ecosystem;
 const { AI_STATE, HERBIVORE_SPECIES, PREDATOR_SPECIES } = Wildborn.animal;
-const { consumePlant, createPlant, updatePlant } = Wildborn.plant;
+const { consumePlant, createPlant, updatePlant, RESPAWN_DELAY_TICKS, RESPAWN_CALORIE_RATIO } =
+  Wildborn.plant;
 const { createSpatialGrid } = Wildborn.spatial;
 
 let failed = 0;
@@ -40,6 +42,13 @@ function assert(cond, msg) {
   } else {
     console.log('OK  ', msg);
   }
+}
+
+// --- Unit: map size ---
+{
+  assert(MAP_TILES === 100, 'map is 100×100 tiles');
+  assert(TILE_SIZE === 32, 'tile size is 32px');
+  assert(MAP_PIXEL_SIZE === 3200, 'map is 3200×3200 pixels');
 }
 
 // --- Unit: spatial grid ---
@@ -53,16 +62,45 @@ function assert(cond, msg) {
   assert(nearest && nearest.id === 2, 'spatial findNearest with predicate');
 }
 
+// --- Unit: pathfinding ---
+{
+  const world = createWorld('path-test');
+  world.ensureMapLoaded();
+  // Find two land tiles
+  let a = null;
+  let b = null;
+  for (let ty = 0; ty < MAP_TILES && !b; ty++) {
+    for (let tx = 0; tx < MAP_TILES; tx++) {
+      const tile = world.getTile(tx, ty);
+      if (!world.isLand(tile)) continue;
+      if (!a) a = { tx, ty };
+      else if (Math.abs(tx - a.tx) + Math.abs(ty - a.ty) > 8) {
+        b = { tx, ty };
+        break;
+      }
+    }
+  }
+  assert(a && b, 'found two land tiles for pathfinding');
+  const path = Wildborn.pathfind.findPath(world, a.tx, a.ty, b.tx, b.ty, { allowWater: false });
+  assert(path && path.length >= 1, 'A* returns a path between land tiles (' + (path && path.length) + ')');
+}
+
 // --- Unit: plant consume / respawn ---
 {
   const p = createPlant('grass', 0, 0);
   assert(p.calories === 10, 'plant starts with 10 calories');
   const taken = consumePlant(p, 100);
-  assert(taken === 10 && !p.alive, 'consumePlant depletes and kills plant');
+  assert(taken === 10 && !p.alive, 'consumePlant depletes and kills plant (stays in memory)');
+  assert(p.respawnTimer === RESPAWN_DELAY_TICKS, 'respawn timer starts at 60s (120 ticks)');
+  assert(RESPAWN_DELAY_TICKS === 120, 'RESPAWN_DELAY_TICKS is 120');
   // Fast-forward respawn
   p.respawnTimer = 1;
   updatePlant(p, () => ({ x: 50, y: 50 }));
-  assert(p.alive && p.x === 50 && p.calories === 10, 'plant respawns after delay');
+  assert(p.alive && p.x === 50, 'plant teleports on respawn');
+  assert(
+    p.calories === p.maxCalories * RESPAWN_CALORIE_RATIO,
+    'plant respawns at 50% max calories (' + p.calories + ')'
+  );
 }
 
 // --- Unit: plant growth / calorie density ---
@@ -81,6 +119,15 @@ function assert(cond, msg) {
   assert(mush.maxCalories === 200, 'mushroom max is 200');
   const cactus = createPlant('cactus', 0, 0);
   assert(cactus.maxCalories === 175, 'cactus max is 175');
+}
+
+// --- Unit: eat rate / sight / water speed ---
+{
+  assert(Wildborn.animal.EAT_RATE_PER_SEC === 1, 'plant eat rate is 1 cal/sec/animal');
+  assert(Wildborn.animal.EAT_RANGE === 20, 'eat range is 20px');
+  assert(Wildborn.animal.PLANT_SIGHT_RANGE === 256, 'plant sight is 8 tiles (256px)');
+  assert(Wildborn.animal.FOOD_DETECT_RANGE === 256, 'food detect matches plant sight');
+  assert(Wildborn.animal.WATER_SPEED_MULT === 0.25, 'water speed is 25% of normal');
 }
 
 // --- Unit: animal factory ---
@@ -107,6 +154,50 @@ function assert(cond, msg) {
   assert(Wildborn.animal.SPEED.fast === 52.5, 'fast speed halved to 52.5');
   assert(Wildborn.animal.SPEED.very_slow === 14, 'very_slow speed halved to 14');
   assert(wolf.baseSpeed === 52.5, 'wolf baseSpeed uses halved fast');
+}
+
+// --- Unit: real-time plant eating (1 cal/sec) ---
+{
+  const rabbit = Wildborn.animal.createAnimal('rabbit', 100, 100);
+  const plant = createPlant('grass', 100, 100);
+  plant.calories = 50;
+  rabbit.state = 'EATING';
+  rabbit.target = plant;
+  rabbit.calories = 10;
+  const ctx = {
+    rng: createRng('eat-test'),
+    tickSeconds: 0.5,
+    world: createWorld('eat-world'),
+    isWater: () => false,
+    findNearestPlant: () => plant,
+    findNearestAnimal: () => null,
+    queryAnimals: () => [],
+  };
+  ctx.world.ensureMapLoaded();
+  Wildborn.animal.updateAnimal(rabbit, 1.0, ctx); // 1 second
+  assert(
+    Math.abs(plant.calories - 49) < 0.01,
+    '1 animal eats 1 cal/sec (plant now ' + plant.calories + ')'
+  );
+  assert(Math.abs(rabbit.calories - 11) < 0.01, 'animal gained 1 calorie');
+
+  // 3 animals → 3 cal/sec
+  plant.calories = 50;
+  const eaters = [];
+  for (let i = 0; i < 3; i++) {
+    const a = Wildborn.animal.createAnimal('rabbit', 100, 100);
+    a.state = 'EATING';
+    a.target = plant;
+    a.calories = 10;
+    eaters.push(a);
+  }
+  for (let i = 0; i < eaters.length; i++) {
+    Wildborn.animal.updateAnimal(eaters[i], 1.0, ctx);
+  }
+  assert(
+    Math.abs(plant.calories - 47) < 0.05,
+    '3 animals eat 3 cal/sec (plant now ' + plant.calories + ')'
+  );
 }
 
 // --- Unit: stamina drain / regen ---
@@ -292,7 +383,7 @@ function assert(cond, msg) {
 {
   const rng = createRng('ecosystem-test-42');
   const world = createWorld('ecosystem-test-42');
-  world.ensureChunksInBounds(-2000, -2000, 2000, 2000);
+  world.ensureMapLoaded();
 
   const eco = createEcosystem({
     world,
@@ -300,25 +391,33 @@ function assert(cond, msg) {
     config: {
       ecosystemEnabled: true,
       ecosystemTickSeconds: 0.5,
-      ecosystemSpawnRadius: 40 * TILE_SIZE,
-      spatialCellSize: 96,
+      mapTiles: 100,
+      ecosystemSpawnRadius: 50 * TILE_SIZE,
+      spatialCellSize: 64,
     },
-    origin: { x: 0, y: 0 },
+    origin: { x: MAP_PIXEL_SIZE / 2, y: MAP_PIXEL_SIZE / 2 },
   });
 
-  assert(eco.plants.length === INITIAL_PLANT_COUNT, 'spawns 2000 plants');
-  assert(INITIAL_PLANT_COUNT === 2000, 'INITIAL_PLANT_COUNT is 2000');
+  assert(eco.plants.length === INITIAL_PLANT_COUNT, 'spawns 150 plants');
+  assert(INITIAL_PLANT_COUNT === 150, 'INITIAL_PLANT_COUNT is 150');
+  assert(eco.mapTiles === 100, 'ecosystem mapTiles is 100');
+  assert(eco.mapPixelSize === 3200, 'ecosystem mapPixelSize is 3200');
 
-  // Plants should be on land (not water)
+  // Plants should be on land (not water) and within map
   let plantsOnLand = 0;
   let plantsOnWater = 0;
+  let plantsInBounds = 0;
   for (const p of eco.plants) {
     const tile = world.getTileAtPixel(p.x, p.y);
     if (world.isSlow(tile)) plantsOnWater++;
     else if (!world.isSolid(tile)) plantsOnLand++;
+    if (p.x >= 0 && p.y >= 0 && p.x < MAP_PIXEL_SIZE && p.y < MAP_PIXEL_SIZE) {
+      plantsInBounds++;
+    }
   }
   assert(plantsOnWater === 0, 'no plants spawned on water');
   assert(plantsOnLand === eco.plants.length, 'all plants spawned on land (' + plantsOnLand + '/' + eco.plants.length + ')');
+  assert(plantsInBounds === eco.plants.length, 'all plants inside 100×100 map');
 
   // Predators start roaming (not hunting) when well-fed
   const wolves = eco.animals.filter((a) => a.species === 'wolf');
@@ -339,16 +438,23 @@ function assert(cond, msg) {
     assert(counts[id] === predExpected[id], `spawn ${id}: ${counts[id]} === ${predExpected[id]}`);
   }
 
-  // Simulate ~60 seconds (120 ticks at 0.5s)
+  // Animals stay in map bounds after simulation
   const dt = 1 / 30;
   for (let i = 0; i < 30 * 60; i++) {
     eco.update(dt);
   }
 
+  let animalsOut = 0;
+  for (const a of eco.animals) {
+    if (!a.alive) continue;
+    if (a.x < 0 || a.y < 0 || a.x > MAP_PIXEL_SIZE || a.y > MAP_PIXEL_SIZE) animalsOut++;
+  }
+  assert(animalsOut === 0, 'no living animals outside map after 60s');
+
   const stats = eco.getDebugStats();
   assert(stats.tick >= 100, 'ecosystem advanced many ticks (' + stats.tick + ')');
-  assert(stats.plantsAlive > 0, 'plants still alive after simulation (' + stats.plantsAlive + ')');
-  assert(stats.plantsMax === 2000, 'debug stats expose plant max 2000');
+  assert(stats.plantsAlive + stats.plantsSprouting === 150, 'plant entities preserved (alive+sprouts=150)');
+  assert(stats.plantsMax === 150, 'debug stats expose plant max 150');
   assert(stats.herbTotal + stats.predTotal > 0, 'animals still alive (' + (stats.herbTotal + stats.predTotal) + ')');
   assert(stats.eggs == null, 'eggs removed from stats');
 

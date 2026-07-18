@@ -6,13 +6,12 @@
 (function () {
   const config = Wildborn.config;
   const { createRng, randomSeedString } = Wildborn.rng;
-  const { createWorld, TILE_SIZE, CHUNK_SIZE } = Wildborn.world;
+  const { createWorld, TILE_SIZE, MAP_PIXEL_SIZE } = Wildborn.world;
   const { createPlayer, updatePlayer, findSpawn } = Wildborn.player;
   const {
     createCamera,
     updateCamera,
     snapCamera,
-    getVisibleBounds,
   } = Wildborn.camera;
   const {
     clear,
@@ -22,6 +21,7 @@
     drawEcosystemDebug,
     drawLegend,
     drawTooltip,
+    drawMinimap,
     pickEntityAt,
     updateHud,
     setSeedDisplay,
@@ -162,12 +162,12 @@
       height: window.innerHeight,
     });
 
-    game.world.ensureChunksInBounds(
-      -TILE_SIZE * 8,
-      -TILE_SIZE * 8,
-      TILE_SIZE * 8,
-      TILE_SIZE * 8
-    );
+    // Lock the playable world to the fixed 100×100 map (3200×3200 px)
+    if (game.world.ensureMapLoaded) {
+      game.world.ensureMapLoaded();
+    } else {
+      game.world.ensureChunksInBounds(0, 0, MAP_PIXEL_SIZE - 1, MAP_PIXEL_SIZE - 1);
+    }
     const spawn = findSpawn(game.world);
     game.player = createPlayer(spawn);
 
@@ -182,7 +182,7 @@
       });
     }
 
-    snapCamera(game.camera, game.player);
+    snapCamera(game.camera, game.player, MAP_PIXEL_SIZE);
     setSeedDisplay(seedString);
     updateHud(game.player);
 
@@ -197,14 +197,15 @@
     game.time += step;
 
     updatePlayer(game.player, game.keys, step, game.world);
-    updateCamera(game.camera, game.player);
+    updateCamera(game.camera, game.player, MAP_PIXEL_SIZE);
 
-    const bounds = getVisibleBounds(game.camera, TILE_SIZE * 2);
-    game.world.ensureChunksInBounds(bounds.x0, bounds.y0, bounds.x1, bounds.y1);
-
-    const playerCx = Math.floor(game.player.x / TILE_SIZE / CHUNK_SIZE);
-    const playerCy = Math.floor(game.player.y / TILE_SIZE / CHUNK_SIZE);
-    game.world.unloadFarChunks(playerCx, playerCy, 3);
+    // Keep the whole fixed map loaded (only a few chunks at 100×100 / 64)
+    if (game.world.ensureMapLoaded) {
+      game.world.ensureMapLoaded();
+    } else {
+      const bounds = getVisibleBounds(game.camera, TILE_SIZE * 2);
+      game.world.ensureChunksInBounds(bounds.x0, bounds.y0, bounds.x1, bounds.y1);
+    }
 
     if (game.ecosystem && config.ecosystemEnabled) {
       game.ecosystem.update(step);
@@ -257,6 +258,10 @@
 
     if (game.hoverEntity) {
       drawTooltip(ctx, game.hoverEntity, game.mouseX, game.mouseY);
+    }
+
+    if (config.showMinimap !== false && game.world) {
+      drawMinimap(ctx, game.world, game.player, game.ecosystem, w, h);
     }
   }
 

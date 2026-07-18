@@ -10,7 +10,7 @@
     createAnimal,
     updateAnimal,
     tickAnimal,
-    clampToRegion,
+    clampToMap,
     HERBIVORE_SPECIES,
     PREDATOR_SPECIES,
     AI_STATE,
@@ -36,7 +36,8 @@
     alligator: 3,
   };
 
-  const INITIAL_PLANT_COUNT = 2000;
+  /** Exactly 150 plants scattered across the 100×100 map. */
+  const INITIAL_PLANT_COUNT = 150;
 
   /**
    * @param {object} opts
@@ -49,10 +50,16 @@
     const world = opts.world;
     const rng = opts.rng.derive('ecosystem');
     const config = opts.config || Wildborn.config;
-    const origin = opts.origin || { x: 0, y: 0 };
-    const spawnRadius = config.ecosystemSpawnRadius || 48 * 32;
+    const mapTiles = world.MAP_TILES || config.mapTiles || 100;
+    const mapPixelSize = world.MAP_PIXEL_SIZE || mapTiles * (world.TILE_SIZE || 32);
+    const TILE_SIZE = world.TILE_SIZE || 32;
+    const origin = opts.origin || {
+      x: mapPixelSize / 2,
+      y: mapPixelSize / 2,
+    };
+    const spawnRadius = config.ecosystemSpawnRadius || mapPixelSize / 2;
     const tickSeconds = config.ecosystemTickSeconds || 0.5;
-    const cellSize = config.spatialCellSize || 96;
+    const cellSize = config.spatialCellSize || 64;
 
     const plants = [];
     const animals = [];
@@ -69,112 +76,130 @@
     let nextGroupId = 1;
     let splashCooldown = 0;
 
-    // -------------------------------------------------------------------------
-    // Spawning helpers
-    // -------------------------------------------------------------------------
-
-    function findWalkableSpot(maxAttempts) {
-      maxAttempts = maxAttempts || 40;
-      for (let i = 0; i < maxAttempts; i++) {
-        const angle = rng.float() * Math.PI * 2;
-        const dist = Math.sqrt(rng.float()) * spawnRadius;
-        const x = origin.x + Math.cos(angle) * dist;
-        const y = origin.y + Math.sin(angle) * dist;
-        const tile = world.getTileAtPixel(x, y);
-        if (!world.isSolid(tile)) {
-          return { x: x, y: y, tile: tile };
-        }
-      }
-      // Fallback near origin
-      return {
-        x: origin.x + rng.range(-64, 64),
-        y: origin.y + rng.range(-64, 64),
-        tile: 0,
-      };
+    function isLandTile(tile) {
+      return world.isLand ? world.isLand(tile) : !world.isSolid(tile) && !world.isSlow(tile);
     }
 
-    /** Plants spawn on any land tile (not water, not solid). */
-    function findLandSpot(maxAttempts) {
-      maxAttempts = maxAttempts || 60;
+    // -------------------------------------------------------------------------
+    // Spawning helpers — pure random tiles on the 100×100 map
+    // -------------------------------------------------------------------------
+
+    /** Pick a random land tile (0–99, 0–99). Retry until land is found. */
+    function findRandomLandTile(maxAttempts) {
+      maxAttempts = maxAttempts || 400;
       for (let i = 0; i < maxAttempts; i++) {
-        // Uniform square sample — avoids center clustering from radial sqrt bias
-        const x = origin.x + (rng.float() * 2 - 1) * spawnRadius;
-        const y = origin.y + (rng.float() * 2 - 1) * spawnRadius;
-        const tile = world.getTileAtPixel(x, y);
-        if (!world.isSolid(tile) && !world.isSlow(tile)) {
-          return { x: x, y: y, tile: tile };
+        const tx = rng.int(0, mapTiles - 1);
+        const ty = rng.int(0, mapTiles - 1);
+        const tile = world.getTile(tx, ty);
+        if (isLandTile(tile)) {
+          return {
+            tx: tx,
+            ty: ty,
+            x: tx * TILE_SIZE + TILE_SIZE / 2,
+            y: ty * TILE_SIZE + TILE_SIZE / 2,
+            tile: tile,
+          };
         }
       }
-      // Fallback: spiral near origin for any land tile
-      const TILE_SIZE = world.TILE_SIZE || 32;
-      for (let r = 0; r < 40; r++) {
+      // Fallback spiral from map center
+      const cx = Math.floor(mapTiles / 2);
+      const cy = Math.floor(mapTiles / 2);
+      for (let r = 0; r < mapTiles; r++) {
         for (let dy = -r; dy <= r; dy++) {
           for (let dx = -r; dx <= r; dx++) {
             if (Math.abs(dx) !== r && Math.abs(dy) !== r && r > 0) continue;
-            const x = origin.x + dx * TILE_SIZE;
-            const y = origin.y + dy * TILE_SIZE;
-            const tile = world.getTileAtPixel(x, y);
-            if (!world.isSolid(tile) && !world.isSlow(tile)) {
-              return { x: x, y: y, tile: tile };
+            const tx = cx + dx;
+            const ty = cy + dy;
+            if (tx < 0 || ty < 0 || tx >= mapTiles || ty >= mapTiles) continue;
+            const tile = world.getTile(tx, ty);
+            if (isLandTile(tile)) {
+              return {
+                tx: tx,
+                ty: ty,
+                x: tx * TILE_SIZE + TILE_SIZE / 2,
+                y: ty * TILE_SIZE + TILE_SIZE / 2,
+                tile: tile,
+              };
             }
           }
         }
       }
-      return findWalkableSpot();
+      return {
+        tx: cx,
+        ty: cy,
+        x: cx * TILE_SIZE + TILE_SIZE / 2,
+        y: cy * TILE_SIZE + TILE_SIZE / 2,
+        tile: 0,
+      };
+    }
+
+    function findWalkableSpot(maxAttempts) {
+      maxAttempts = maxAttempts || 80;
+      for (let i = 0; i < maxAttempts; i++) {
+        const tx = rng.int(0, mapTiles - 1);
+        const ty = rng.int(0, mapTiles - 1);
+        const tile = world.getTile(tx, ty);
+        if (!world.isSolid(tile)) {
+          return {
+            x: tx * TILE_SIZE + TILE_SIZE / 2,
+            y: ty * TILE_SIZE + TILE_SIZE / 2,
+            tile: tile,
+          };
+        }
+      }
+      return findRandomLandTile();
+    }
+
+    function findLandSpot() {
+      return findRandomLandTile();
     }
 
     function findWaterSpot(maxAttempts) {
-      maxAttempts = maxAttempts || 60;
+      maxAttempts = maxAttempts || 120;
       for (let i = 0; i < maxAttempts; i++) {
-        const spot = findWalkableSpot(1);
-        if (world.isSlow(world.getTileAtPixel(spot.x, spot.y))) return spot;
-        const angle = rng.float() * Math.PI * 2;
-        const dist = Math.sqrt(rng.float()) * spawnRadius;
-        const x = origin.x + Math.cos(angle) * dist;
-        const y = origin.y + Math.sin(angle) * dist;
-        if (world.isSlow(world.getTileAtPixel(x, y))) return { x: x, y: y };
+        const tx = rng.int(0, mapTiles - 1);
+        const ty = rng.int(0, mapTiles - 1);
+        if (world.isSlow(world.getTile(tx, ty))) {
+          return {
+            x: tx * TILE_SIZE + TILE_SIZE / 2,
+            y: ty * TILE_SIZE + TILE_SIZE / 2,
+          };
+        }
       }
       return findWalkableSpot();
     }
 
+    /** Respawn: completely random land tile anywhere on the 100×100 map. */
     function findRespawnSpot() {
-      return findLandSpot(40);
+      return findRandomLandTile(500);
     }
 
     function spawnInitial() {
-      // Plants — scatter across the full spawn map on any land
-      const gridN = Math.ceil(Math.sqrt(INITIAL_PLANT_COUNT));
-      const extent = spawnRadius * 2;
-      const cell = extent / gridN;
+      // Plants — pure random scatter: pick tile (0–99), land → spawn, else retry
       let planted = 0;
-
-      for (let gy = 0; gy < gridN && planted < INITIAL_PLANT_COUNT; gy++) {
-        for (let gx = 0; gx < gridN && planted < INITIAL_PLANT_COUNT; gx++) {
-          let x =
-            origin.x - spawnRadius + (gx + 0.5) * cell + rng.range(-cell * 0.35, cell * 0.35);
-          let y =
-            origin.y - spawnRadius + (gy + 0.5) * cell + rng.range(-cell * 0.35, cell * 0.35);
-          const tile = world.getTileAtPixel(x, y);
-          if (world.isSolid(tile) || world.isSlow(tile)) {
-            const spot = findLandSpot(12);
-            x = spot.x;
-            y = spot.y;
-          }
-          const plant = createPlant(pickSpecies(rng), x, y);
-          if (
-            world.isSolid(world.getTileAtPixel(plant.x, plant.y)) ||
-            world.isSlow(world.getTileAtPixel(plant.x, plant.y))
-          ) {
-            relocateToLand(plant, world);
-          }
-          plants.push(plant);
-          planted++;
-        }
+      let attempts = 0;
+      const maxAttempts = INITIAL_PLANT_COUNT * 80;
+      while (planted < INITIAL_PLANT_COUNT && attempts < maxAttempts) {
+        attempts++;
+        const tx = rng.int(0, mapTiles - 1);
+        const ty = rng.int(0, mapTiles - 1);
+        const tile = world.getTile(tx, ty);
+        if (!isLandTile(tile)) continue;
+        const x = tx * TILE_SIZE + TILE_SIZE / 2;
+        const y = ty * TILE_SIZE + TILE_SIZE / 2;
+        const plant = createPlant(pickSpecies(rng), x, y);
+        plant.tx = tx;
+        plant.ty = ty;
+        plants.push(plant);
+        planted++;
       }
-
+      // Guaranteed fill if RNG was unlucky (still land-only)
       while (planted < INITIAL_PLANT_COUNT) {
-        const spot = findLandSpot();
-        plants.push(createPlant(pickSpecies(rng), spot.x, spot.y));
+        const spot = findRandomLandTile();
+        const plant = createPlant(pickSpecies(rng), spot.x, spot.y);
+        plant.tx = spot.tx;
+        plant.ty = spot.ty;
+        plants.push(plant);
         planted++;
       }
 
@@ -190,12 +215,13 @@
             inGroup = 0;
           }
           const spot = findWalkableSpot();
-          // Cluster herd members near each other
           let x = spot.x;
           let y = spot.y;
           if (inGroup > 0 && def.maxGroupSize > 1) {
             x += rng.range(-40, 40);
             y += rng.range(-40, 40);
+            x = Math.max(TILE_SIZE, Math.min(mapPixelSize - TILE_SIZE, x));
+            y = Math.max(TILE_SIZE, Math.min(mapPixelSize - TILE_SIZE, y));
           }
           animals.push(createAnimal(species, x, y, { groupId: groupId }));
           inGroup++;
@@ -219,8 +245,9 @@
           if (inGroup > 0 && def.maxGroupSize > 1) {
             x += rng.range(-50, 50);
             y += rng.range(-50, 50);
+            x = Math.max(TILE_SIZE, Math.min(mapPixelSize - TILE_SIZE, x));
+            y = Math.max(TILE_SIZE, Math.min(mapPixelSize - TILE_SIZE, y));
           }
-          // Lion sex: prefer females for hunting flavor (60% female)
           const sex = species === 'lion' ? (rng.chance(0.6) ? 'female' : 'male') : undefined;
           animals.push(createAnimal(species, x, y, { groupId: groupId, sex: sex }));
           inGroup++;
@@ -236,6 +263,7 @@
       plantGrid.clear();
       animalGrid.clear();
       for (let i = 0; i < plants.length; i++) {
+        // Only alive plants are food targets; dead ones stay in memory for sprouts
         if (plants[i].alive) plantGrid.insert(plants[i]);
       }
       for (let i = 0; i < animals.length; i++) {
@@ -251,6 +279,8 @@
       return {
         rng: rng,
         tickSeconds: tickSeconds,
+        world: world,
+        mapPixelSize: mapPixelSize,
         isWater: function (x, y) {
           return world.isSlow(world.getTileAtPixel(x, y));
         },
@@ -263,6 +293,10 @@
         queryAnimals: function (x, y, radius) {
           return animalGrid.queryRadius(x, y, radius);
         },
+        /** Animals within eat range of a plant (performance: spatial, not N×M). */
+        queryAnimalsNear: function (x, y, radius) {
+          return animalGrid.queryRadius(x, y, radius);
+        },
         spawnPoop: function (x, y) {
           poops.push({
             x: x + rng.range(-3, 3),
@@ -272,7 +306,6 @@
           });
         },
         spawnSplash: function (x, y) {
-          // Rate-limit so dense herds don't flood the particle list
           if (splashCooldown > 0) return;
           splashCooldown = 0.04;
           for (let i = 0; i < 3; i++) {
@@ -299,11 +332,11 @@
 
       if (splashCooldown > 0) splashCooldown -= dt;
 
-      // Continuous movement / AI
+      // Continuous movement / AI — full map is small enough to update all
       for (let i = 0; i < animals.length; i++) {
         const a = animals[i];
         updateAnimal(a, dt, ctx);
-        if (a.alive) clampToRegion(a, origin.x, origin.y, spawnRadius * 1.15);
+        if (a.alive) clampToMap(a, mapPixelSize);
       }
 
       // Visual particles (poop fade + splash motion)
@@ -331,9 +364,12 @@
     function runTick(ctx) {
       tickCount += 1;
 
-      // Plants — grow anywhere; respawn on land
+      // Plants — grow anywhere; respawn teleports to random land
       for (let i = 0; i < plants.length; i++) {
-        updatePlant(plants[i], findRespawnSpot);
+        const p = plants[i];
+        updatePlant(p, findRespawnSpot);
+        p.tx = Math.floor(p.x / TILE_SIZE);
+        p.ty = Math.floor(p.y / TILE_SIZE);
       }
 
       // Animals
@@ -361,7 +397,6 @@
         animals.push(newborns[i]);
       }
 
-      // Rebuild after tick mutations so mid-tick queries stay sane next frame
       rebuildGrids();
     }
 
@@ -372,10 +407,13 @@
     function getDebugStats() {
       let plantsAlive = 0;
       let plantCalories = 0;
+      let plantsSprouting = 0;
       for (let i = 0; i < plants.length; i++) {
         if (plants[i].alive) {
           plantsAlive++;
           plantCalories += plants[i].calories;
+        } else {
+          plantsSprouting++;
         }
       }
 
@@ -427,6 +465,7 @@
         tick: tickCount,
         plantsAlive: plantsAlive,
         plantsMax: INITIAL_PLANT_COUNT,
+        plantsSprouting: plantsSprouting,
         plantAvgCalories: plantsAlive ? Math.round(plantCalories / plantsAlive) : 0,
         herbivores: herbCounts,
         herbTotal: herbTotal,
@@ -436,17 +475,16 @@
         corpses: corpses,
         poops: poops.length,
         animalTotal: animals.length,
+        mapTiles: mapTiles,
       };
     }
 
-    // Boot
-    // Ensure chunks exist across the spawn region before placing entities
-    world.ensureChunksInBounds(
-      origin.x - spawnRadius,
-      origin.y - spawnRadius,
-      origin.x + spawnRadius,
-      origin.y + spawnRadius
-    );
+    // Boot — load the entire 100×100 map before placing entities
+    if (world.ensureMapLoaded) {
+      world.ensureMapLoaded();
+    } else {
+      world.ensureChunksInBounds(0, 0, mapPixelSize - 1, mapPixelSize - 1);
+    }
     spawnInitial();
     rebuildGrids();
 
@@ -459,6 +497,8 @@
       getDebugStats: getDebugStats,
       origin: origin,
       spawnRadius: spawnRadius,
+      mapTiles: mapTiles,
+      mapPixelSize: mapPixelSize,
       tickCount: function () {
         return tickCount;
       },

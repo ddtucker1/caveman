@@ -29,8 +29,12 @@
     very_fast: 72.5,
   };
   const MIN_SPEED = 0.5;
-  /** Animals on water move at half their current speed. */
-  const WATER_SPEED_MULT = 0.5;
+  /** Animals on water move at 25% of normal speed (stacks with other modifiers). */
+  const WATER_SPEED_MULT = 0.25;
+  const TILE_SIZE = 32;
+  /** Herbivores "see" plants within this many tiles (8 × 32 = 256px). */
+  const PLANT_SIGHT_TILES = 8;
+  const PLANT_SIGHT_RANGE = PLANT_SIGHT_TILES * TILE_SIZE;
 
   // ---------------------------------------------------------------------------
   // Species definitions
@@ -272,7 +276,8 @@
   const CALORIE_BURN_DIVISOR = 10;
   /** Minimum calories burned per ecosystem tick. */
   const MIN_CALORIE_BURN = 0.5;
-  const EAT_RANGE = 18;
+  /** Animals must be within 20px of a plant to eat it. */
+  const EAT_RANGE = 20;
   const ATTACK_RANGE = 22;
   const MATE_RANGE = 28;
   const FLEE_DETECT_RANGE = 160;
@@ -280,12 +285,18 @@
   const FLEE_ENTER_RANGE = 100;
   /** Herbivores stop fleeing once the predator is this far away. */
   const FLEE_SAFE_RANGE = 200;
-  const FOOD_DETECT_RANGE = 320;
+  /** Plant sight / food detect: 8 tiles = 256px. Prey detect uses the same base. */
+  const FOOD_DETECT_RANGE = PLANT_SIGHT_RANGE;
   const PACK_JOIN_RANGE = 200;
   const STEAL_RANGE = 24;
-  const EAT_RATE = 12; // calories per tick while eating
+  /** Plant eating: 1 calorie per second per animal (real-time in updateEating). */
+  const EAT_RATE_PER_SEC = 1;
+  /** Corpse / steal transfer rate (calories per ecosystem tick). */
+  const EAT_RATE = 6;
   const ATTACK_COOLDOWN_TICKS = 2;
   const IDLE_WANDER_CHANCE = 0.35;
+  /** Recompute grid path at most this often (seconds). */
+  const PATH_REPATH_SECONDS = 0.45;
 
   /** Predators hunt at ≤30% calories; return to roaming at ≥80%. */
   const PREDATOR_HUNT_RATIO = 0.3;
@@ -518,11 +529,8 @@
     if (!animal.isAdult) speed *= 0.7;
     // Growth scale slightly affects speed
     speed *= 0.7 + 0.3 * animal.growth;
-    // Water halves current speed (stacks with global speed halve → ~25% of original)
-    if (animal._inWater && animal.special !== 'ambush') {
-      speed *= WATER_SPEED_MULT;
-    } else if (animal._inWater && animal.special === 'ambush') {
-      // Ambush predators keep water bonus but still pay half vs land-equivalent
+    // Water: 25% of current speed (alligators still pay the water mult after land-equivalent)
+    if (animal._inWater) {
       speed *= WATER_SPEED_MULT;
     }
     return Math.max(MIN_SPEED, speed);
@@ -545,62 +553,75 @@
   }
 
   /**
-   * Pick a step toward (tx,ty), detouring around water when possible.
-   * Returns {x,y} waypoint (may equal target).
+   * Ensure animal has a fresh grid path toward (tx, ty).
+   * Uses A* on the 100×100 map; water only when desperate / alligator.
    */
-  function pathWaypoint(animal, tx, ty, ctx) {
-    if (!ctx.isWater || canCrossWater(animal, ctx)) {
-      return { x: tx, y: ty };
+  function ensurePath(animal, tx, ty, ctx) {
+    if (!ctx || !ctx.world || !Wildborn.pathfind) return null;
+    animal._pathTimer = (animal._pathTimer || 0) - (ctx._frameDt || 0.016);
+    const goalChanged =
+      !animal._pathGoal ||
+      Math.hypot(animal._pathGoal.x - tx, animal._pathGoal.y - ty) > TILE_SIZE * 0.75;
+    if (
+      animal._path &&
+      animal._pathIndex < animal._path.length &&
+      !goalChanged &&
+      animal._pathTimer > 0
+    ) {
+      return animal._path;
     }
 
-    const dx = tx - animal.x;
-    const dy = ty - animal.y;
-    const len = Math.hypot(dx, dy) || 1;
-    const step = Math.min(48, len);
-    const nx = animal.x + (dx / len) * step;
-    const ny = animal.y + (dy / len) * step;
-
-    // Direct path clear of water — go straight
-    if (!ctx.isWater(nx, ny) && !segmentHitsWater(animal.x, animal.y, nx, ny, ctx)) {
-      return { x: tx, y: ty };
-    }
-
-    // Try perpendicular detours (left/right of travel direction)
-    const px = -dy / len;
-    const py = dx / len;
-    const offsets = [40, 70, 110, -40, -70, -110];
-    let best = null;
-    let bestScore = Infinity;
-    for (let i = 0; i < offsets.length; i++) {
-      const ox = animal.x + px * offsets[i] + (dx / len) * step * 0.6;
-      const oy = animal.y + py * offsets[i] + (dy / len) * step * 0.6;
-      if (ctx.isWater(ox, oy)) continue;
-      if (segmentHitsWater(animal.x, animal.y, ox, oy, ctx)) continue;
-      const score = Math.hypot(ox - tx, oy - ty) + Math.abs(offsets[i]) * 0.15;
-      if (score < bestScore) {
-        bestScore = score;
-        best = { x: ox, y: oy };
-      }
-    }
-    if (best) return best;
-
-    // No dry detour — hold position rather than walk into water
-    return { x: animal.x, y: animal.y };
+    const allowWater = canCrossWater(animal, ctx);
+    const path = Wildborn.pathfind.pathToPixel(
+      ctx.world,
+      animal.x,
+      animal.y,
+      tx,
+      ty,
+      { allowWater: allowWater }
+    );
+    animal._path = path || [];
+    animal._pathIndex = 0;
+    animal._pathGoal = { x: tx, y: ty };
+    animal._pathTimer = PATH_REPATH_SECONDS;
+    animal._pathAllowWater = allowWater;
+    return animal._path;
   }
 
-  function segmentHitsWater(x0, y0, x1, y1, ctx) {
-    if (!ctx.isWater) return false;
-    for (let i = 1; i <= 4; i++) {
-      const t = i / 4;
-      const x = x0 + (x1 - x0) * t;
-      const y = y0 + (y1 - y0) * t;
-      if (ctx.isWater(x, y)) return true;
-    }
-    return false;
+  function clearPath(animal) {
+    animal._path = null;
+    animal._pathIndex = 0;
+    animal._pathGoal = null;
+    animal._pathTimer = 0;
   }
 
   function moveToward(animal, tx, ty, dt, speedMult, ctx) {
-    const waypoint = ctx ? pathWaypoint(animal, tx, ty, ctx) : { x: tx, y: ty };
+    if (ctx) ctx._frameDt = dt;
+
+    let waypoint = { x: tx, y: ty };
+    if (ctx && ctx.world && Wildborn.pathfind) {
+      const path = ensurePath(animal, tx, ty, ctx);
+      if (path && path.length) {
+        // Advance along waypoints
+        while (
+          animal._pathIndex < path.length &&
+          Math.hypot(path[animal._pathIndex].x - animal.x, path[animal._pathIndex].y - animal.y) < 10
+        ) {
+          animal._pathIndex++;
+        }
+        if (animal._pathIndex < path.length) {
+          waypoint = path[animal._pathIndex];
+        } else {
+          waypoint = { x: tx, y: ty };
+        }
+      } else if (!canCrossWater(animal, ctx) && ctx.isWater && ctx.isWater(tx, ty)) {
+        // No dry path — hold rather than enter water
+        animal.vx = 0;
+        animal.vy = 0;
+        return;
+      }
+    }
+
     const dx = waypoint.x - animal.x;
     const dy = waypoint.y - animal.y;
     const len = Math.hypot(dx, dy);
@@ -617,6 +638,22 @@
     const prevY = animal.y;
     animal.x += animal.vx * dt;
     animal.y += animal.vy * dt;
+
+    // Soft reject illegal water entry when not allowed
+    if (
+      ctx &&
+      ctx.isWater &&
+      ctx.isWater(animal.x, animal.y) &&
+      !canCrossWater(animal, ctx) &&
+      animal.special !== 'ambush'
+    ) {
+      animal.x = prevX;
+      animal.y = prevY;
+      animal.vx = 0;
+      animal.vy = 0;
+      clearPath(animal);
+      return;
+    }
 
     // Splash particles when moving through water
     if (animal._inWater && ctx && ctx.spawnSplash) {
@@ -1290,6 +1327,8 @@
     const t = animal.target;
     if (!isValidFoodTarget(animal, t)) {
       animal.target = null;
+      animal._eatBobTimer = 0;
+      clearPath(animal);
       if (isPredator(animal) && animal._hunting && hungerRatio(animal) < PREDATOR_SATIATED_RATIO) {
         animal.state = AI_STATE.SEEK_PREY;
       } else if (isHungry(animal)) {
@@ -1300,19 +1339,34 @@
       return;
     }
 
-    // Stay near food
+    // Stay near food (must be within 20px to eat plants)
+    const range = t.kind === 'plant' ? EAT_RANGE : EAT_RANGE + 8;
     const d2 = dist2(animal.x, animal.y, t.x, t.y);
-    if (d2 > (EAT_RANGE + 8) * (EAT_RANGE + 8)) {
+    if (d2 > range * range) {
+      animal._eatBobTimer = 0;
       moveToward(animal, t.x, t.y, dt, 0.8, ctx);
       return;
     }
 
+    // Stop moving — eating animation (head bob once per second toward plant)
     animal.vx = 0;
     animal.vy = 0;
+    clearPath(animal);
+    animal._eatBobTimer = (animal._eatBobTimer || 0) + dt;
+    if (animal._eatBobTimer >= 1) animal._eatBobTimer -= 1;
+    animal.eatBobPhase = animal._eatBobTimer;
+
+    // Face the food
+    if (t.x >= animal.x) animal._facingRight = true;
+    else animal._facingRight = false;
 
     // Raccoon steal from live animal
     if (animal.special === 'steal' && t.kind === 'animal' && t.alive && t.state !== AI_STATE.DEAD) {
-      const stolen = Math.min(EAT_RATE * dt * 2, t.calories * 0.05, animal.maxCalories - animal.calories);
+      const stolen = Math.min(
+        EAT_RATE_PER_SEC * 2 * dt,
+        t.calories * 0.05,
+        animal.maxCalories - animal.calories
+      );
       if (stolen > 0) {
         t.calories -= stolen;
         animal.calories += stolen;
@@ -1324,8 +1378,37 @@
       return;
     }
 
-    // Actual calorie transfer happens on tick for plants/corpses (rate-limited there).
-    // Here we just hold position; tickAnimal does the eat.
+    // Plants: 1 calorie/sec per animal eating (real-time calorie bar)
+    if (t.kind === 'plant' && t.alive) {
+      const room = animal.maxCalories - animal.calories;
+      if (room <= 0) {
+        animal.state = postEatState(animal);
+        animal.target = null;
+        animal._eatBobTimer = 0;
+        return;
+      }
+      const eaten = Wildborn.plant.consumePlant(t, Math.min(EAT_RATE_PER_SEC * dt, room));
+      animal.calories += eaten;
+      if (!t.alive || animal.calories >= animal.maxCalories * 0.95) {
+        animal.target = null;
+        animal.state = postEatState(animal);
+        animal._eatBobTimer = 0;
+      }
+      return;
+    }
+
+    // Corpses: continuous transfer at a modest rate
+    if (t.kind === 'animal' && t.state === AI_STATE.DEAD) {
+      const room = animal.maxCalories - animal.calories;
+      const eaten = Math.min(EAT_RATE_PER_SEC * 1.5 * dt, t.corpseCalories, room);
+      t.corpseCalories -= eaten;
+      animal.calories += eaten;
+      if (t.corpseCalories <= 0 || animal.calories >= animal.maxCalories * 0.95) {
+        animal.target = null;
+        animal.state = postEatState(animal);
+        animal._eatBobTimer = 0;
+      }
+    }
   }
 
   function updateFlee(animal, dt, ctx) {
@@ -1563,28 +1646,13 @@
       wakeAnimal(animal);
     }
 
-    // Eating on tick
+    // Plant / corpse calorie transfer runs in real time via updateEating.
+    // Tick only clears a full stomach if the continuous path somehow stalled.
     if (animal.state === AI_STATE.EATING && animal.target) {
-      const t = animal.target;
       const room = animal.maxCalories - animal.calories;
       if (room <= 0) {
         animal.state = postEatState(animal);
         animal.target = null;
-      } else if (t.kind === 'plant' && t.alive) {
-        const eaten = Wildborn.plant.consumePlant(t, Math.min(EAT_RATE, room));
-        animal.calories += eaten;
-        if (!t.alive || animal.calories >= animal.maxCalories * 0.95) {
-          animal.target = null;
-          animal.state = postEatState(animal);
-        }
-      } else if (t.kind === 'animal' && t.state === AI_STATE.DEAD) {
-        const eaten = Math.min(EAT_RATE * 1.5, t.corpseCalories, room);
-        t.corpseCalories -= eaten;
-        animal.calories += eaten;
-        if (t.corpseCalories <= 0 || animal.calories >= animal.maxCalories * 0.95) {
-          animal.target = null;
-          animal.state = postEatState(animal);
-        }
       }
     }
 
@@ -1646,6 +1714,14 @@
     }
   }
 
+  /** Hard clamp animals inside the fixed 100×100 map. */
+  function clampToMap(animal, mapPixelSize) {
+    mapPixelSize = mapPixelSize == null ? 3200 : mapPixelSize;
+    const pad = Math.max(4, (animal.size || 8) * 0.5);
+    animal.x = Math.max(pad, Math.min(mapPixelSize - pad, animal.x));
+    animal.y = Math.max(pad, Math.min(mapPixelSize - pad, animal.y));
+  }
+
   Wildborn.animal = {
     AI_STATE,
     SPEED,
@@ -1668,6 +1744,12 @@
     STAMINA_PANT_THRESHOLD,
     FLEE_ENTER_RANGE,
     FLEE_SAFE_RANGE,
+    FOOD_DETECT_RANGE,
+    PLANT_SIGHT_RANGE,
+    PLANT_SIGHT_TILES,
+    EAT_RANGE,
+    EAT_RATE_PER_SEC,
+    WATER_SPEED_MULT,
     SLEEP_ENTER_RATIO,
     SLEEP_WAKE_RATIO,
     SLEEP_IDLE_SECONDS,
@@ -1682,9 +1764,11 @@
     isHerbivore,
     isPredator,
     clampToRegion,
+    clampToMap,
     applyDamage,
     calorieBurnPerTick,
     enterSleep,
     wakeAnimal,
+    canCrossWater,
   };
 })(typeof window !== 'undefined' ? window : globalThis);
