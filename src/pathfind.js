@@ -1,6 +1,7 @@
 /**
  * Grid A* pathfinding on the fixed world tilemap.
  * 4-connected; water is blocked unless allowWater is set.
+ * Uses a binary min-heap open set and numeric tile keys for speed.
  */
 (function (global) {
   const Wildborn = (global.Wildborn = global.Wildborn || {});
@@ -17,8 +18,8 @@
   function findPath(world, startTx, startTy, goalTx, goalTy, opts) {
     opts = opts || {};
     const allowWater = !!opts.allowWater;
-    // 400×400 map: allow longer paths (Manhattan up to ~800 tiles)
-    const maxNodes = opts.maxNodes || 48000;
+    const cfg = Wildborn.config || {};
+    const maxNodes = opts.maxNodes || cfg.pathfindMaxNodes || 6000;
     const mapW = world.MAP_TILES || Wildborn.world.MAP_TILES || 400;
     const mapH = world.MAP_TILES || Wildborn.world.MAP_TILES || 400;
     const TILE_SIZE = world.TILE_SIZE || Wildborn.world.TILE_SIZE || 32;
@@ -31,7 +32,6 @@
     if (startTx === goalTx && startTy === goalTy) return [];
 
     if (!isWalkable(world, goalTx, goalTy, allowWater)) {
-      // Soften goal: nearest walkable around target
       const alt = nearestWalkable(world, goalTx, goalTy, allowWater, 6);
       if (!alt) return null;
       goalTx = alt.tx;
@@ -39,42 +39,61 @@
       if (startTx === goalTx && startTy === goalTy) return [];
     }
 
-    const open = [];
-    const openSet = new Map();
+    // Binary min-heap of { tx, ty, f }; parallel best-f map by numeric key.
+    const heap = [];
+    const openBest = new Map();
     const cameFrom = new Map();
     const gScore = new Map();
 
     function key(tx, ty) {
-      return tx + ',' + ty;
+      return ty * mapW + tx;
     }
 
     function heuristic(tx, ty) {
       return Math.abs(tx - goalTx) + Math.abs(ty - goalTy);
     }
 
-    function pushOpen(tx, ty, g, f) {
-      const k = key(tx, ty);
-      const prev = openSet.get(k);
-      if (prev != null && prev <= f) return;
-      openSet.set(k, f);
-      open.push({ tx: tx, ty: ty, f: f });
-      gScore.set(k, g);
+    function heapPush(node) {
+      heap.push(node);
+      let i = heap.length - 1;
+      while (i > 0) {
+        const p = (i - 1) >> 1;
+        if (heap[p].f <= heap[i].f) break;
+        const tmp = heap[p];
+        heap[p] = heap[i];
+        heap[i] = tmp;
+        i = p;
+      }
     }
 
-    function popOpen() {
-      let bestI = 0;
-      let bestF = open[0].f;
-      for (let i = 1; i < open.length; i++) {
-        if (open[i].f < bestF) {
-          bestF = open[i].f;
-          bestI = i;
-        }
+    function heapPop() {
+      const top = heap[0];
+      const last = heap.pop();
+      if (heap.length === 0) return top;
+      heap[0] = last;
+      let i = 0;
+      for (;;) {
+        const l = i * 2 + 1;
+        const r = l + 1;
+        let smallest = i;
+        if (l < heap.length && heap[l].f < heap[smallest].f) smallest = l;
+        if (r < heap.length && heap[r].f < heap[smallest].f) smallest = r;
+        if (smallest === i) break;
+        const tmp = heap[i];
+        heap[i] = heap[smallest];
+        heap[smallest] = tmp;
+        i = smallest;
       }
-      const node = open[bestI];
-      open[bestI] = open[open.length - 1];
-      open.pop();
-      openSet.delete(key(node.tx, node.ty));
-      return node;
+      return top;
+    }
+
+    function pushOpen(tx, ty, g, f) {
+      const k = key(tx, ty);
+      const prev = openBest.get(k);
+      if (prev != null && prev <= f) return;
+      openBest.set(k, f);
+      gScore.set(k, g);
+      heapPush({ tx: tx, ty: ty, f: f });
     }
 
     pushOpen(startTx, startTy, 0, heuristic(startTx, startTy));
@@ -86,15 +105,20 @@
       [0, -1],
     ];
     let expanded = 0;
+    const goalKey = key(goalTx, goalTy);
 
-    while (open.length && expanded < maxNodes) {
-      const cur = popOpen();
+    while (heap.length && expanded < maxNodes) {
+      const cur = heapPop();
+      const ck = key(cur.tx, cur.ty);
+      // Stale heap entry (better path already known)
+      const bestF = openBest.get(ck);
+      if (bestF != null && cur.f > bestF) continue;
       expanded++;
-      if (cur.tx === goalTx && cur.ty === goalTy) {
-        return reconstruct(cameFrom, cur.tx, cur.ty, TILE_SIZE);
+
+      if (ck === goalKey) {
+        return reconstruct(cameFrom, cur.tx, cur.ty, TILE_SIZE, mapW);
       }
 
-      const ck = key(cur.tx, cur.ty);
       const gCur = gScore.get(ck);
       for (let i = 0; i < dirs.length; i++) {
         const nx = cur.tx + dirs[i][0];
@@ -112,16 +136,16 @@
     return null;
   }
 
-  function reconstruct(cameFrom, tx, ty, TILE_SIZE) {
+  function reconstruct(cameFrom, tx, ty, TILE_SIZE, mapW) {
     const tiles = [{ tx: tx, ty: ty }];
-    let k = tx + ',' + ty;
+    let k = ty * mapW + tx;
     while (cameFrom.has(k)) {
       k = cameFrom.get(k);
-      const parts = k.split(',');
-      tiles.push({ tx: +parts[0], ty: +parts[1] });
+      const txx = k % mapW;
+      const tyy = (k / mapW) | 0;
+      tiles.push({ tx: txx, ty: tyy });
     }
     tiles.reverse();
-    // Drop start tile; return pixel centers
     const out = [];
     for (let i = 1; i < tiles.length; i++) {
       out.push({

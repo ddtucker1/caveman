@@ -259,15 +259,63 @@
     // Spatial rebuild
     // -------------------------------------------------------------------------
 
-    function rebuildGrids() {
+    function rebuildPlantGrid() {
       plantGrid.clear();
-      animalGrid.clear();
       for (let i = 0; i < plants.length; i++) {
         // Only alive plants are food targets; dead ones stay in memory for sprouts
         if (plants[i].alive) plantGrid.insert(plants[i]);
       }
+    }
+
+    function rebuildAnimalGrid() {
+      animalGrid.clear();
       for (let i = 0; i < animals.length; i++) {
         animalGrid.insert(animals[i]);
+      }
+    }
+
+    function rebuildGrids() {
+      rebuildPlantGrid();
+      rebuildAnimalGrid();
+    }
+
+    /** Count living (non-corpse) animals for the population soft-cap. */
+    function livingAnimalCount() {
+      let n = 0;
+      for (let i = 0; i < animals.length; i++) {
+        const a = animals[i];
+        if (a.alive && a.state !== AI_STATE.DEAD) n++;
+      }
+      return n;
+    }
+
+    /**
+     * Cheap far-LOD step: keep sliding along an existing path / velocity
+     * without AI decisions or new A* searches.
+     */
+    function cheapMoveAnimal(animal, dt) {
+      if (animal.state === AI_STATE.DEAD || animal.burrowed) return;
+      if (animal._path && animal._pathIndex < animal._path.length) {
+        const wp = animal._path[animal._pathIndex];
+        const dx = wp.x - animal.x;
+        const dy = wp.y - animal.y;
+        const len = Math.hypot(dx, dy);
+        if (len < 10) {
+          animal._pathIndex++;
+          return;
+        }
+        const speed = Math.max(8, animal.baseSpeed || 20);
+        const step = Math.min(len, speed * dt);
+        animal.x += (dx / len) * step;
+        animal.y += (dy / len) * step;
+        animal.vx = (dx / len) * speed;
+        animal.vy = (dy / len) * speed;
+        animal.facingRight = dx >= 0;
+        return;
+      }
+      if (animal.vx || animal.vy) {
+        animal.x += animal.vx * dt;
+        animal.y += animal.vy * dt;
       }
     }
 
@@ -276,11 +324,21 @@
     // -------------------------------------------------------------------------
 
     function makeCtx() {
+      const pathBudget =
+        (config.pathfindBudgetPerFrame != null
+          ? config.pathfindBudgetPerFrame
+          : 10) | 0;
       return {
         rng: rng,
         tickSeconds: tickSeconds,
         world: world,
         mapPixelSize: mapPixelSize,
+        /** Decremented by animal pathfinding; 0 means reuse old paths this frame. */
+        pathBudget: pathBudget,
+        /** Soft population cap gate used by tickAnimal before breed(). */
+        canSpawnOffspring: function () {
+          return livingAnimalCount() < (config.maxAnimals || 120);
+        },
         isWater: function (x, y) {
           return world.isSlow(world.getTileAtPixel(x, y));
         },
@@ -326,16 +384,36 @@
     // Update loop
     // -------------------------------------------------------------------------
 
-    function update(dt) {
-      rebuildGrids();
+    let frameIndex = 0;
+
+    /**
+     * @param {number} dt
+     * @param {{x:number,y:number}|null} [focus] player/camera focus for sim LOD
+     */
+    function update(dt, focus) {
+      frameIndex += 1;
+      // Plants only move on discrete ticks; animals move every frame.
+      rebuildAnimalGrid();
       const ctx = makeCtx();
 
       if (splashCooldown > 0) splashCooldown -= dt;
 
-      // Continuous movement / AI — full map is small enough to update all
+      const nearPx = config.simLodNearPx || 1400;
+      const near2 = nearPx * nearPx;
+      const farEvery = Math.max(1, (config.simLodFarEveryN || 4) | 0);
+      const fx = focus && focus.x != null ? focus.x : mapPixelSize / 2;
+      const fy = focus && focus.y != null ? focus.y : mapPixelSize / 2;
+
       for (let i = 0; i < animals.length; i++) {
         const a = animals[i];
-        updateAnimal(a, dt, ctx);
+        const dx = a.x - fx;
+        const dy = a.y - fy;
+        const far = dx * dx + dy * dy > near2;
+        if (far && (i + frameIndex) % farEvery !== 0) {
+          cheapMoveAnimal(a, dt);
+        } else {
+          updateAnimal(a, dt, ctx);
+        }
         if (a.alive) clampToMap(a, mapPixelSize);
       }
 
@@ -373,13 +451,17 @@
       }
 
       // Animals
+      const maxAnimals = config.maxAnimals || 120;
+      let living = livingAnimalCount();
       const newborns = [];
       const toRemove = [];
       for (let i = 0; i < animals.length; i++) {
         const result = tickAnimal(animals[i], ctx);
-        if (result.offspring) {
+        if (result.offspring && living < maxAnimals) {
           for (let k = 0; k < result.offspring.length; k++) {
+            if (living >= maxAnimals) break;
             newborns.push(result.offspring[k]);
+            living++;
           }
         }
         if (result.remove) toRemove.push(animals[i].id);
@@ -476,6 +558,7 @@
         poops: poops.length,
         animalTotal: animals.length,
         mapTiles: mapTiles,
+        maxAnimals: config.maxAnimals || 120,
       };
     }
 

@@ -24,6 +24,30 @@
     /** Spatial hash cell size in world pixels (tuned for ~150 plants / ~100 animals). */
     spatialCellSize: 64,
 
+    /**
+     * Soft population cap. Breeding is blocked once living animals reach this.
+     * Prevents unbounded pathfinding and AI cost as the food web grows.
+     */
+    maxAnimals: 120,
+
+    /**
+     * Full AI + pathfinding within this distance (px) of the player focus.
+     * Farther animals use cheap velocity integration most frames.
+     */
+    simLodNearPx: 1400,
+
+    /** Far animals run a full AI update every N frames (1 = always). */
+    simLodFarEveryN: 4,
+
+    /** Max A-star expansions per path request (lower = cheaper, shorter max path). */
+    pathfindMaxNodes: 6000,
+
+    /** Max new A-star searches started per frame across the whole ecosystem. */
+    pathfindBudgetPerFrame: 10,
+
+    /** Seconds between minimap entity-dot redraws (terrain stays cached). */
+    minimapEntityInterval: 0.2,
+
     /** Show ecosystem debug overlay (also toggleable with F3 in-game). */
     ecosystemDebugOverlay: false,
 

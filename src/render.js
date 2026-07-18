@@ -863,6 +863,10 @@
   /** Cached terrain bitmap for the full-map minimap (rebuilt per world seed). */
   let _minimapTerrain = null;
   let _minimapSeed = null;
+  /** Cached plant/animal dots layer (refreshed on an interval). */
+  let _minimapEntities = null;
+  let _minimapEntitiesAt = -Infinity;
+  let _minimapEntitySize = 0;
 
   function ensureMinimapTerrain(world) {
     const mapTiles = world.MAP_TILES || Wildborn.world.MAP_TILES || 400;
@@ -887,7 +891,57 @@
     mctx.putImageData(img, 0, 0);
     _minimapTerrain = c;
     _minimapSeed = world.seedString;
+    _minimapEntities = null;
+    _minimapEntitiesAt = -Infinity;
     return c;
+  }
+
+  function ensureMinimapEntities(ecosystem, mapPx, size) {
+    const interval =
+      (Wildborn.config && Wildborn.config.minimapEntityInterval) != null
+        ? Wildborn.config.minimapEntityInterval
+        : 0.2;
+    const now =
+      typeof performance !== 'undefined' && performance.now
+        ? performance.now() / 1000
+        : Date.now() / 1000;
+    if (
+      _minimapEntities &&
+      _minimapEntitySize === size &&
+      now - _minimapEntitiesAt < interval
+    ) {
+      return _minimapEntities;
+    }
+    if (!_minimapEntities || _minimapEntitySize !== size) {
+      _minimapEntities = document.createElement('canvas');
+      _minimapEntities.width = size;
+      _minimapEntities.height = size;
+      _minimapEntitySize = size;
+    }
+    const mctx = _minimapEntities.getContext('2d');
+    mctx.clearRect(0, 0, size, size);
+    if (ecosystem) {
+      const plants = ecosystem.plants;
+      for (let i = 0; i < plants.length; i++) {
+        const p = plants[i];
+        const px = (p.x / mapPx) * size;
+        const py = (p.y / mapPx) * size;
+        mctx.fillStyle = p.alive ? 'rgba(120, 220, 80, 0.85)' : 'rgba(60, 100, 40, 0.7)';
+        mctx.fillRect(px - 0.5, py - 0.5, 1.5, 1.5);
+      }
+      const animals = ecosystem.animals;
+      for (let i = 0; i < animals.length; i++) {
+        const a = animals[i];
+        if (!a.alive || a.state === 'DEAD') continue;
+        const ax = (a.x / mapPx) * size;
+        const ay = (a.y / mapPx) * size;
+        const pred = a.diet === 'predator' || a.diet === 'omnivore';
+        mctx.fillStyle = pred ? 'rgba(220, 70, 60, 0.9)' : 'rgba(240, 230, 180, 0.85)';
+        mctx.fillRect(ax - 1, ay - 1, 2, 2);
+      }
+    }
+    _minimapEntitiesAt = now;
+    return _minimapEntities;
   }
 
   /**
@@ -913,29 +967,11 @@
     ctx.drawImage(terrain, x, y, size, size);
 
     if (ecosystem) {
-      // Plants (alive = green dots, sprouts = tiny dark)
-      const plants = ecosystem.plants;
-      for (let i = 0; i < plants.length; i++) {
-        const p = plants[i];
-        const px = x + (p.x / mapPx) * size;
-        const py = y + (p.y / mapPx) * size;
-        ctx.fillStyle = p.alive ? 'rgba(120, 220, 80, 0.85)' : 'rgba(60, 100, 40, 0.7)';
-        ctx.fillRect(px - 0.5, py - 0.5, 1.5, 1.5);
-      }
-      // Animals
-      const animals = ecosystem.animals;
-      for (let i = 0; i < animals.length; i++) {
-        const a = animals[i];
-        if (!a.alive || a.state === 'DEAD') continue;
-        const ax = x + (a.x / mapPx) * size;
-        const ay = y + (a.y / mapPx) * size;
-        const pred = a.diet === 'predator' || a.diet === 'omnivore';
-        ctx.fillStyle = pred ? 'rgba(220, 70, 60, 0.9)' : 'rgba(240, 230, 180, 0.85)';
-        ctx.fillRect(ax - 1, ay - 1, 2, 2);
-      }
+      const entities = ensureMinimapEntities(ecosystem, mapPx, size);
+      ctx.drawImage(entities, x, y, size, size);
     }
 
-    // Player
+    // Player (always live)
     if (player) {
       const px = x + (player.x / mapPx) * size;
       const py = y + (player.y / mapPx) * size;
