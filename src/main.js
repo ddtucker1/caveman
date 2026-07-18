@@ -341,8 +341,6 @@
         ? Wildborn.animal.calorieBurnPerTick(entity)
         : 0;
     const burnPerSec = burnPerTick / tickSec;
-    const stam = Math.round(entity.stamina != null ? entity.stamina : 100);
-    const maxStam = Math.round(entity.maxStamina != null ? entity.maxStamina : 100);
     const cooldownTicks = entity.breedingCooldown || 0;
     const cooldownSec = Math.ceil(cooldownTicks * tickSec);
     const repro = cooldownTicks <= 0 ? 'ready' : cooldownSec + 's remaining';
@@ -352,7 +350,6 @@
     html += inspRow('Calories', Math.round(entity.calories) + ' / ' + Math.round(entity.maxCalories));
     html += inspRow('Burn rate', burnPerSec.toFixed(2) + ' cal/s');
     html += inspRow('State', formatInspectState(entity));
-    html += inspRow('Stamina', stam + ' / ' + maxStam);
     html += inspRow('Reproduction', repro);
     html += inspRow('Speed', curSpeed.toFixed(1) + ' / ' + maxSpeed.toFixed(1));
 

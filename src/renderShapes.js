@@ -113,11 +113,6 @@
         drawCalorieBar(ctx, x, y, sz, calRatio);
       } else if (def.category === 'herbivore' || def.category === 'predator') {
         drawCalorieBar(ctx, x, y, sz, calRatio);
-        const stamina = opts.stamina != null ? opts.stamina : 100;
-        const maxStamina = opts.maxStamina != null ? opts.maxStamina : 100;
-        if (stamina < maxStamina) {
-          drawStaminaBar(ctx, x, y, sz, stamina / maxStamina);
-        }
       }
     }
 
@@ -267,24 +262,6 @@
     else if (ratio < 0.66) color = '#d4b84a';
     ctx.fillStyle = color;
     ctx.fillRect(bx, by, w * Math.max(0, Math.min(1, ratio)), h);
-  }
-
-  /** Stamina bar: 20×4px, floating below calorie bar. Hidden at full. */
-  function drawStaminaBar(ctx, x, y, sz, ratio) {
-    const bar = Wildborn.shapes.getShapeDefs().shared.calorieBar;
-    const w = 20;
-    const h = 4;
-    const bx = x - w / 2;
-    const by = y - sz * 0.55 + bar.offsetY + bar.height + 2;
-    const r = Math.max(0, Math.min(1, ratio));
-    ctx.fillStyle = 'rgba(0,0,0,0.35)';
-    ctx.fillRect(bx, by, w, h);
-    // Green 100–60, Yellow 59–30, Red 29–0
-    let color = '#4caf50';
-    if (r * 100 <= 29) color = '#e53935';
-    else if (r * 100 <= 59) color = '#fbc02d';
-    ctx.fillStyle = color;
-    ctx.fillRect(bx, by, w * r, h);
   }
 
   function drawMotionLines(ctx, x, y, facingRight, sz) {
