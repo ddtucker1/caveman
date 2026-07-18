@@ -554,7 +554,7 @@
 
   /**
    * Ensure animal has a fresh grid path toward (tx, ty).
-   * Uses A* on the 100×100 map; water only when desperate / alligator.
+   * Uses A* on the 200×200 map; water only when desperate / alligator.
    */
   function ensurePath(animal, tx, ty, ctx) {
     if (!ctx || !ctx.world || !Wildborn.pathfind) return null;
@@ -1378,8 +1378,10 @@
       return;
     }
 
-    // Plants: 1 calorie/sec per animal eating (real-time calorie bar)
+    // Plants: 1 calorie/sec per animal eating (real-time calorie bar).
+    // Growth stops immediately once eating starts (until depleted + respawn).
     if (t.kind === 'plant' && t.alive) {
+      if (Wildborn.plant.pauseGrowth) Wildborn.plant.pauseGrowth(t);
       const room = animal.maxCalories - animal.calories;
       if (room <= 0) {
         animal.state = postEatState(animal);
@@ -1714,9 +1716,9 @@
     }
   }
 
-  /** Hard clamp animals inside the fixed 100×100 map. */
+  /** Hard clamp animals inside the fixed 200×200 map. */
   function clampToMap(animal, mapPixelSize) {
-    mapPixelSize = mapPixelSize == null ? 3200 : mapPixelSize;
+    mapPixelSize = mapPixelSize == null ? 6400 : mapPixelSize;
     const pad = Math.max(4, (animal.size || 8) * 0.5);
     animal.x = Math.max(pad, Math.min(mapPixelSize - pad, animal.x));
     animal.y = Math.max(pad, Math.min(mapPixelSize - pad, animal.y));

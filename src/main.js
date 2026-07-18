@@ -162,7 +162,7 @@
       height: window.innerHeight,
     });
 
-    // Lock the playable world to the fixed 100×100 map (3200×3200 px)
+    // Lock the playable world to the fixed 200×200 map (6400×6400 px)
     if (game.world.ensureMapLoaded) {
       game.world.ensureMapLoaded();
     } else {
@@ -199,7 +199,7 @@
     updatePlayer(game.player, game.keys, step, game.world);
     updateCamera(game.camera, game.player, MAP_PIXEL_SIZE);
 
-    // Keep the whole fixed map loaded (only a few chunks at 100×100 / 64)
+    // Keep the whole fixed map loaded (16 chunks at 200×200 / 64)
     if (game.world.ensureMapLoaded) {
       game.world.ensureMapLoaded();
     } else {
