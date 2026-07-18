@@ -253,14 +253,6 @@
     return n;
   }
 
-  function formatInspectAge(entity) {
-    if (entity.kind === 'plant') return '—';
-    if (!entity.isAdult) return 'Baby';
-    const elderAge = (Wildborn.animal && Wildborn.animal.ADULT_AGE) || 80;
-    if (entity.age > elderAge + 80) return 'Elder';
-    return 'Adult';
-  }
-
   function formatInspectState(entity) {
     if (entity.kind === 'plant') {
       if (!entity.alive) {
@@ -315,12 +307,7 @@
     const maxStam = Math.round(entity.maxStamina != null ? entity.maxStamina : 100);
     const cooldownTicks = entity.breedingCooldown || 0;
     const cooldownSec = Math.ceil(cooldownTicks * tickSec);
-    const repro =
-      entity.isAdult && cooldownTicks <= 0
-        ? 'ready'
-        : !entity.isAdult
-          ? '—'
-          : cooldownSec + 's remaining';
+    const repro = cooldownTicks <= 0 ? 'ready' : cooldownSec + 's remaining';
     const curSpeed = Math.hypot(entity.vx || 0, entity.vy || 0);
     const maxSpeed = entity.baseSpeed != null ? entity.baseSpeed : 0;
 
@@ -329,7 +316,6 @@
     html += inspRow('State', formatInspectState(entity));
     html += inspRow('Stamina', stam + ' / ' + maxStam);
     html += inspRow('Reproduction', repro);
-    html += inspRow('Age', formatInspectAge(entity));
     html += inspRow('Speed', curSpeed.toFixed(1) + ' / ' + maxSpeed.toFixed(1));
 
     if (entity.diet === 'predator' || entity.diet === 'omnivore') {

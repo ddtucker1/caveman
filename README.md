@@ -18,7 +18,7 @@ Entities use **data-driven geometric silhouettes** (`src/shapes.json` /
 - **Tab** — toggle Ecosystem Census (also via top-right Census button)
 - **L** — toggle species legend (icons, names, live population counts)
 - **F3** — toggle ecosystem debug overlay (population & calorie stats)
-- **Hover** — entity tooltip (species, calories, age, state)
+- **Hover** — entity tooltip (species, calories, state)
 
 ### Config
 

@@ -569,19 +569,9 @@
       }
     );
 
-    // Juvenile soft ring (does not change hitbox)
-    if (animal.alive && !animal.isAdult && animal.state !== 'DEAD') {
-      ctx.strokeStyle = 'rgba(255,255,255,0.3)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.arc(s.x, s.y, animal.size * 0.65, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-
     // Subtle glow pulse when ready to reproduce (calories ≥ 80% and cooldown done)
     if (
       animal.alive &&
-      animal.isAdult &&
       animal.state !== 'DEAD' &&
       Wildborn.animal &&
       typeof Wildborn.animal.canBreed === 'function' &&
@@ -697,14 +687,6 @@
     }
   }
 
-  function ageLabel(entity) {
-    if (entity.kind === 'plant') return '—';
-    if (!entity.isAdult) return 'Baby';
-    const elderAge = (Wildborn.animal && Wildborn.animal.ADULT_AGE) || 30;
-    if (entity.age > elderAge + 80) return 'Elder';
-    return 'Adult';
-  }
-
   function stateLabel(entity) {
     if (entity.kind === 'plant') {
       if (!entity.alive) return 'Depleted';
@@ -778,7 +760,6 @@
     const name = (def && def.label) || entity.label || entity.species;
     const cal = Math.round(entity.calories);
     const maxCal = Math.round(entity.maxCalories);
-    const age = ageLabel(entity);
     const st = stateLabel(entity);
 
     const lines = [
@@ -793,7 +774,6 @@
           ' stam'
       );
     }
-    lines.push('Age: ' + age);
     lines.push('State: ' + st);
 
     ctx.font = '12px monospace';

@@ -9,7 +9,7 @@
     /** Master switch — when false, EcosystemManager is not created or updated. */
     ecosystemEnabled: true,
 
-    /** Seconds of real time per discrete ecosystem tick (hunger, growth, age). */
+    /** Seconds of real time per discrete ecosystem tick (hunger, growth, reproduction). */
     ecosystemTickSeconds: 0.5,
 
     /** Fixed playable map size in tiles (400×400 → 12800×12800 px at 32px tiles). */
