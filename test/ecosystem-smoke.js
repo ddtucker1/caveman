@@ -218,6 +218,127 @@ function assert(cond, msg) {
   );
 }
 
+// --- Unit: stubborn plant eating (commit until full / depleted / predator) ---
+{
+  assert(
+    Wildborn.animal.EAT_PREDATOR_INTERRUPT_RANGE === 50,
+    'predator interrupt range while eating is 50px'
+  );
+
+  function eatCtx(extras) {
+    return Object.assign(
+      {
+        rng: createRng('stubborn-eat'),
+        tickSeconds: 0.5,
+        world: createWorld('stubborn-eat-world'),
+        isWater: () => false,
+        findNearestPlant: () => null,
+        findNearestAnimal: () => null,
+        queryAnimals: () => [],
+      },
+      extras || {}
+    );
+  }
+
+  // Does not stop at 60% hunger-return mid-meal
+  {
+    const rabbit = Wildborn.animal.createAnimal('rabbit', 100, 100);
+    const plant = createPlant('grass', 100, 100);
+    plant.calories = 80;
+    rabbit.state = 'EATING';
+    rabbit.target = plant;
+    rabbit._hungerSearch = true;
+    rabbit.calories = rabbit.maxCalories * 0.55;
+    const before = rabbit.calories;
+    Wildborn.animal.updateAnimal(rabbit, 1.0, eatCtx({ findNearestPlant: () => plant }));
+    assert(rabbit.state === 'EATING', 'keeps EATING past 55% (no 60% bailout)');
+    assert(rabbit.target === plant, 'stays locked on plant past hunger-return band');
+    assert(rabbit.calories > before, 'continues transferring calories while locked in');
+    assert(rabbit.eatLocked === true, 'sets eatLocked visual while consuming plant');
+  }
+
+  // Stops only at 100% full
+  {
+    const rabbit = Wildborn.animal.createAnimal('rabbit', 100, 100);
+    const plant = createPlant('grass', 100, 100);
+    plant.calories = 200;
+    rabbit.state = 'EATING';
+    rabbit.target = plant;
+    rabbit._hungerSearch = true;
+    rabbit.calories = rabbit.maxCalories - 0.5;
+    Wildborn.animal.updateAnimal(rabbit, 1.0, eatCtx({ findNearestPlant: () => plant }));
+    assert(rabbit.calories >= rabbit.maxCalories, 'fills to 100% calories');
+    assert(rabbit.state !== 'EATING', 'leaves EATING once fully full');
+    assert(rabbit.target == null, 'abandons plant once full');
+    assert(rabbit.eatLocked === false, 'clears eatLocked when finished');
+  }
+
+  // Plant depletes before full → SEARCHING_FOR_FOOD at 50% rule
+  {
+    const rabbit = Wildborn.animal.createAnimal('rabbit', 100, 100);
+    const plant = createPlant('grass', 100, 100);
+    plant.calories = 0.5;
+    rabbit.state = 'EATING';
+    rabbit.target = plant;
+    rabbit.calories = rabbit.maxCalories * 0.4;
+    Wildborn.animal.updateAnimal(rabbit, 1.0, eatCtx());
+    assert(!plant.alive || plant.calories <= 0, 'plant is depleted');
+    assert(
+      rabbit.state === 'SEEK_FOOD' && rabbit._hungerSearch,
+      'plant deplete while hungry → SEEK_FOOD hunger-search'
+    );
+  }
+
+  // Predator within 50px actively targeting → immediate FLEE
+  {
+    const rabbit = Wildborn.animal.createAnimal('rabbit', 100, 100);
+    const plant = createPlant('grass', 100, 100);
+    plant.calories = 80;
+    const wolf = Wildborn.animal.createAnimal('wolf', 120, 100);
+    wolf.target = rabbit;
+    wolf._hunting = true;
+    wolf.state = 'SEEK_PREY';
+    rabbit.state = 'EATING';
+    rabbit.target = plant;
+    rabbit.calories = 20;
+    const ctx = eatCtx({
+      findNearestAnimal: (x, y, radius, pred) => {
+        if (pred && pred(wolf) && Math.hypot(wolf.x - x, wolf.y - y) <= radius) return wolf;
+        return null;
+      },
+      queryAnimals: () => [wolf],
+    });
+    Wildborn.animal.updateAnimal(rabbit, 0.1, ctx);
+    assert(rabbit.state === 'FLEE', 'predator targeting within 50px interrupts eating → FLEE');
+    assert(rabbit.target == null, 'abandons plant on predator interrupt');
+    assert(rabbit.fleeFrom === wolf, 'flees from the targeting predator');
+    assert(rabbit.eatLocked === false, 'clears locked-in indicator on flee');
+  }
+
+  // Nearby predator NOT targeting this animal does not interrupt
+  {
+    const rabbit = Wildborn.animal.createAnimal('rabbit', 100, 100);
+    const plant = createPlant('grass', 100, 100);
+    plant.calories = 80;
+    const wolf = Wildborn.animal.createAnimal('wolf', 120, 100);
+    wolf.target = null;
+    wolf.state = 'ROAM';
+    rabbit.state = 'EATING';
+    rabbit.target = plant;
+    rabbit.calories = 20;
+    const ctx = eatCtx({
+      findNearestAnimal: (x, y, radius, pred) => {
+        if (pred && pred(wolf) && Math.hypot(wolf.x - x, wolf.y - y) <= radius) return wolf;
+        return null;
+      },
+      queryAnimals: () => [wolf],
+    });
+    Wildborn.animal.updateAnimal(rabbit, 0.5, ctx);
+    assert(rabbit.state === 'EATING', 'non-targeting nearby predator does not interrupt');
+    assert(rabbit.target === plant, 'stays on plant when predator is not targeting');
+  }
+}
+
 // --- Unit: stamina drain / regen ---
 {
   const rabbit = Wildborn.animal.createAnimal('rabbit', 0, 0);

@@ -288,6 +288,11 @@
   const FLEE_ENTER_RANGE = 100;
   /** Herbivores stop fleeing once the predator is this far away. */
   const FLEE_SAFE_RANGE = 200;
+  /**
+   * While eating a plant, interrupt only if a predator within this range is
+   * actively targeting this animal (stubborn eating).
+   */
+  const EAT_PREDATOR_INTERRUPT_RANGE = 50;
   /** Plant sight / food detect: 8 tiles = 256px. Prey detect uses the same base. */
   const FOOD_DETECT_RANGE = PLANT_SIGHT_RANGE;
   const PACK_JOIN_RANGE = 200;
@@ -1453,11 +1458,77 @@
     }
   }
 
+  /**
+   * Predator within interrupt range that is actively targeting this animal.
+   * Used only while stubbornly eating a plant.
+   */
+  function findEatingPredatorThreat(animal, ctx) {
+    if (!ctx || !ctx.findNearestAnimal) return null;
+    return ctx.findNearestAnimal(
+      animal.x,
+      animal.y,
+      EAT_PREDATOR_INTERRUPT_RANGE,
+      function (o) {
+        return (
+          o.alive &&
+          isPredator(o) &&
+          o.diet !== 'herbivore' &&
+          o.id !== animal.id &&
+          o.target === animal
+        );
+      }
+    );
+  }
+
+  function clearEatingVisuals(animal) {
+    animal._eatBobTimer = 0;
+    animal._eatLockShake = 0;
+    animal.eatBobPhase = 0;
+    animal.eatLockPhase = 0;
+    animal.eatLocked = false;
+  }
+
+  /** Plant depleted before full → SEEK_FOOD when the 50% hunger rule still applies. */
+  function afterPlantDepleted(animal) {
+    animal.target = null;
+    clearEatingVisuals(animal);
+    clearPath(animal);
+    if (isPredator(animal) && animal._hunting && hungerRatio(animal) < PREDATOR_SATIATED_RATIO) {
+      animal.state = AI_STATE.SEEK_PREY;
+      return;
+    }
+    if (isHungry(animal) || animal._hungerSearch) {
+      if (!animal._hungerSearch) enterHungerSearch(animal);
+      else animal.state = AI_STATE.SEEK_FOOD;
+      return;
+    }
+    clearHungerSearch(animal);
+    animal.state = defaultRestState(animal);
+  }
+
+  function interruptEatingFlee(animal, threat) {
+    animal.target = null;
+    clearEatingVisuals(animal);
+    clearPath(animal);
+    animal.state = AI_STATE.FLEE;
+    animal.fleeFrom = threat;
+    animal.stateTimer = 2.5;
+    animal._fleeExhausted = animal.stamina <= 0;
+    if (animal.special === 'alert') animal._alertPulse = true;
+  }
+
   function updateEating(animal, dt, ctx) {
     const t = animal.target;
+    const eatingPlant = !!(t && t.kind === 'plant');
+
     if (!isValidFoodTarget(animal, t)) {
+      // Depleted plant / invalid food — plant path uses 50% hunger-search rule
+      if (eatingPlant) {
+        afterPlantDepleted(animal);
+        return;
+      }
       animal.target = null;
-      animal._eatBobTimer = 0;
+      clearEatingVisuals(animal);
       clearPath(animal);
       if (isPredator(animal) && animal._hunting && hungerRatio(animal) < PREDATOR_SATIATED_RATIO) {
         animal.state = AI_STATE.SEEK_PREY;
@@ -1471,14 +1542,22 @@
       return;
     }
 
-    // Hunger-search satiation: resume normal behavior once ≥60%
-    if (
+    // Stubborn plant eating: commit until 100% full, plant depleted, or predator interrupt.
+    // Do NOT bail at the 60% hunger-return threshold mid-meal.
+    if (eatingPlant) {
+      const threat = findEatingPredatorThreat(animal, ctx);
+      if (threat) {
+        interruptEatingFlee(animal, threat);
+        return;
+      }
+    } else if (
       animal._hungerSearch &&
       !animal._hunting &&
       hungerRatio(animal) >= HUNGER_RETURN_RATIO
     ) {
+      // Non-plant food (corpse / steal): keep prior hunger-return satiation
       animal.target = null;
-      animal._eatBobTimer = 0;
+      clearEatingVisuals(animal);
       clearPath(animal);
       clearHungerSearch(animal);
       animal.state = defaultRestState(animal);
@@ -1489,6 +1568,7 @@
     const range = t.kind === 'plant' ? EAT_RANGE : EAT_RANGE + 8;
     const d2 = dist2(animal.x, animal.y, t.x, t.y);
     if (d2 > range * range) {
+      animal.eatLocked = false;
       animal._eatBobTimer = 0;
       moveToward(animal, t.x, t.y, dt, 0.8, ctx);
       return;
@@ -1508,6 +1588,7 @@
 
     // Raccoon steal from live animal
     if (animal.special === 'steal' && t.kind === 'animal' && t.alive && t.state !== AI_STATE.DEAD) {
+      animal.eatLocked = false;
       const stolen = Math.min(
         EAT_RATE_PER_SEC * 2 * dt,
         t.calories * 0.05,
@@ -1520,41 +1601,54 @@
       if (animal.calories >= animal.maxCalories * 0.95 || t.calories < 5) {
         animal.state = defaultRestState(animal);
         animal.target = null;
+        clearEatingVisuals(animal);
       }
       return;
     }
 
-    // Plants: 1 calorie/sec per animal eating (real-time calorie bar).
+    // Plants: continuous 1 cal/sec — stubborn commit until full / depleted / predator.
     // Growth stops immediately once eating starts (until depleted + respawn).
     if (t.kind === 'plant' && t.alive) {
       if (Wildborn.plant.pauseGrowth) Wildborn.plant.pauseGrowth(t);
+      animal.eatLocked = true;
+      // Locked-in head shake every 3 seconds
+      animal._eatLockShake = (animal._eatLockShake || 0) + dt;
+      if (animal._eatLockShake >= 3) animal._eatLockShake -= 3;
+      animal.eatLockPhase = animal._eatLockShake;
+
       const room = animal.maxCalories - animal.calories;
       if (room <= 0) {
-        animal.state = postEatState(animal);
         animal.target = null;
-        animal._eatBobTimer = 0;
+        clearEatingVisuals(animal);
+        animal.state = postEatState(animal);
         return;
       }
       const eaten = Wildborn.plant.consumePlant(t, Math.min(EAT_RATE_PER_SEC * dt, room));
       animal.calories += eaten;
-      if (!t.alive || animal.calories >= animal.maxCalories * 0.95) {
+      if (!t.alive || t.calories <= 0) {
+        afterPlantDepleted(animal);
+        return;
+      }
+      // Full stomach only — no mid-meal re-evaluate / bite-size bailout
+      if (animal.calories >= animal.maxCalories) {
         animal.target = null;
+        clearEatingVisuals(animal);
         animal.state = postEatState(animal);
-        animal._eatBobTimer = 0;
       }
       return;
     }
 
     // Corpses: continuous transfer at a modest rate
     if (t.kind === 'animal' && t.state === AI_STATE.DEAD) {
+      animal.eatLocked = false;
       const room = animal.maxCalories - animal.calories;
       const eaten = Math.min(EAT_RATE_PER_SEC * 1.5 * dt, t.corpseCalories, room);
       t.corpseCalories -= eaten;
       animal.calories += eaten;
       if (t.corpseCalories <= 0 || animal.calories >= animal.maxCalories * 0.95) {
         animal.target = null;
+        clearEatingVisuals(animal);
         animal.state = postEatState(animal);
-        animal._eatBobTimer = 0;
       }
     }
   }
@@ -1844,6 +1938,7 @@
     STAMINA_PANT_THRESHOLD,
     FLEE_ENTER_RANGE,
     FLEE_SAFE_RANGE,
+    EAT_PREDATOR_INTERRUPT_RANGE,
     FOOD_DETECT_RANGE,
     PLANT_SIGHT_RANGE,
     PLANT_SIGHT_TILES,

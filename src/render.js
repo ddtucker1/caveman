@@ -552,6 +552,8 @@
         attacking: attacking,
         eating: animal.state === 'EATING',
         eatBobPhase: animal.eatBobPhase || 0,
+        eatLocked: !!animal.eatLocked,
+        eatLockPhase: animal.eatLockPhase || 0,
         roaring: roaring || lionRoar,
         rearUp: rearUp,
         sleeping: sleeping,
