@@ -132,8 +132,6 @@
           tile = TILE.CLIFF;
         } else if (river > 0.48 && river < 0.54 && elev < 0.55) {
           tile = TILE.WATER;
-        } else if (river > 0.45 && river < 0.57 && elev < 0.58) {
-          tile = TILE.SAND;
         } else if (moist > 0.55 && elev > 0.35 && elev < 0.65) {
           const local = valueNoise2D(wx * 0.5, wy * 0.5, seedNum + 333);
           tile = local > 0.55 ? TILE.TREE : TILE.DENSE_GRASS;

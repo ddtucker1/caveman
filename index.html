@@ -75,9 +75,9 @@
       padding: 6px 10px;
       border-radius: 4px;
     }
-    #btn-census {
+    #btn-census,
+    #btn-speed {
       position: absolute;
-      top: 44px;
       right: 12px;
       pointer-events: auto;
       cursor: pointer;
@@ -89,14 +89,23 @@
       color: #e8e4d4;
       text-shadow: 0 1px 2px #000;
     }
-    #btn-census:hover {
+    #btn-census { top: 44px; }
+    #btn-speed { top: 76px; }
+    #btn-census:hover,
+    #btn-speed:hover {
       filter: brightness(1.15);
       border-color: rgba(255, 255, 255, 0.4);
     }
-    #btn-census.hidden { display: none; }
+    #btn-speed.active {
+      border-color: rgba(180, 220, 120, 0.7);
+      color: #d8f0a8;
+      background: rgba(40, 60, 20, 0.7);
+    }
+    #btn-census.hidden,
+    #btn-speed.hidden { display: none; }
     #census-window {
       position: absolute;
-      top: 80px;
+      top: 112px;
       right: 12px;
       width: min(420px, 92vw);
       pointer-events: auto;
@@ -338,6 +347,7 @@
 
       <div id="seed-display">Seed: —</div>
       <button id="btn-census" class="hidden" type="button" title="Toggle Ecosystem Census (Tab)">Census</button>
+      <button id="btn-speed" class="hidden" type="button" title="Toggle 3× game speed">Speed 3×</button>
 
       <div id="census-window" class="hidden" role="dialog" aria-label="Ecosystem Census">
         <div id="census-titlebar">

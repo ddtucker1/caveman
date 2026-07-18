@@ -12,6 +12,8 @@
       width: size.width,
       height: size.height,
       follow: 0.15,
+      /** When false, camera stays put (e.g. after minimap pan) until re-enabled. */
+      followPlayer: true,
     };
   }
 
@@ -35,12 +37,14 @@
     }
   }
 
-  /** Smoothly center camera on the player. */
+  /** Smoothly center camera on the player (no-op when followPlayer is false). */
   function updateCamera(camera, target, mapPixelSize) {
-    const targetX = target.x + target.w / 2 - camera.width / 2;
-    const targetY = target.y + target.h / 2 - camera.height / 2;
-    camera.x += (targetX - camera.x) * camera.follow;
-    camera.y += (targetY - camera.y) * camera.follow;
+    if (camera.followPlayer !== false) {
+      const targetX = target.x + target.w / 2 - camera.width / 2;
+      const targetY = target.y + target.h / 2 - camera.height / 2;
+      camera.x += (targetX - camera.x) * camera.follow;
+      camera.y += (targetY - camera.y) * camera.follow;
+    }
     if (mapPixelSize != null) clampCameraToMap(camera, mapPixelSize);
   }
 
