@@ -6,8 +6,8 @@
   const Wildborn = (global.Wildborn = global.Wildborn || {});
   const { TILE_SIZE } = Wildborn.world;
 
-  /** Hitbox / visual size — 50% larger than the original 20×20. */
-  const PLAYER_SIZE = 30;
+  /** Hitbox / visual size — 50% smaller than the previous 30×30. */
+  const PLAYER_SIZE = 15;
   const BASE_SPEED = 140; // pixels per second
   const WATER_SPEED_MULT = 0.45;
 

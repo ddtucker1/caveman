@@ -29,6 +29,8 @@
   const MIN_SPEED = 0.5;
   /** Animals on water move at 25% of normal speed (stacks with other modifiers). */
   const WATER_SPEED_MULT = 0.25;
+  /** Turtles / alligators (aquatic) move at 2× land speed while in water. */
+  const AQUATIC_WATER_SPEED_MULT = 2;
   const TILE_SIZE = 32;
   /** Herbivores "see" plants within this many tiles (8 × 32 = 256px). */
   const PLANT_SIGHT_TILES = 8;
@@ -137,6 +139,7 @@
       diet: 'herbivore',
       maxGroupSize: 1,
       speed: 'very_slow',
+      aquatic: true,
       caloriesNeededPerDay: 40,
       maxCalories: 80,
       maxHealth: 150,
@@ -232,7 +235,7 @@
       diet: 'predator',
       maxGroupSize: 1,
       speed: 'slow',
-      waterSpeed: 'fast',
+      aquatic: true,
       caloriesNeededPerDay: 180,
       maxCalories: 360,
       maxHealth: 180,
@@ -302,6 +305,13 @@
   const WATER_DESPERATION_FLEE_DIST = 100;
   /** Starvation desperation: cross water below this calorie ratio. */
   const WATER_DESPERATION_STARVE_RATIO = 0.2;
+  /** Seconds pinned at a water edge before allowing a temporary water crossing. */
+  const WATER_STUCK_CROSS_SECONDS = 1.25;
+  /** Minimum map fraction to travel when hunger-searching distant areas. */
+  const HUNGER_EXPLORE_MIN_MAP_FRAC = 0.35;
+  /** Refresh distant explore goals this often while searching. */
+  const HUNGER_EXPLORE_GOAL_MIN = 8;
+  const HUNGER_EXPLORE_GOAL_MAX = 14;
   /** Poop while roaming: every 5–10s, fade after 30s. */
   const POOP_INTERVAL_MIN = 5;
   const POOP_INTERVAL_MAX = 10;
@@ -405,6 +415,11 @@
       _spiralRadius: 0,
       _spiralOriginX: null,
       _spiralOriginY: null,
+      /** Distant map waypoint while hunger-/hunt-searching. */
+      _exploreGoal: null,
+      _exploreTimer: 0,
+      /** Seconds spent soft-rejected at a water shoreline. */
+      _waterStuckTimer: 0,
 
       groupId: opts.groupId != null ? opts.groupId : 0,
       maxGroupSize: def.maxGroupSize,
@@ -412,6 +427,8 @@
 
       speedKey: def.speed,
       baseSpeed: baseSpeed,
+      /** Turtles / alligators: double speed in water and free water crossing. */
+      aquatic: !!(def.aquatic || def.waterSpeed),
       waterSpeedKey: def.waterSpeed || null,
       attackPower: def.attackPower || 5,
       defense: def.defense || 'flee',
@@ -540,6 +557,9 @@
     animal._spiralRadius = TILE_SIZE * 2;
     animal._spiralOriginX = animal.x;
     animal._spiralOriginY = animal.y;
+    animal._exploreGoal = null;
+    animal._exploreTimer = 0;
+    animal._waterStuckTimer = 0;
     if (animal.state !== AI_STATE.EATING) {
       animal.state = AI_STATE.SEEK_PREY;
     }
@@ -555,6 +575,9 @@
     animal._spiralRadius = TILE_SIZE * 2;
     animal._spiralOriginX = animal.x;
     animal._spiralOriginY = animal.y;
+    animal._exploreGoal = null;
+    animal._exploreTimer = 0;
+    animal._waterStuckTimer = 0;
     animal.state = AI_STATE.SEEK_FOOD;
     clearPath(animal);
   }
@@ -566,6 +589,9 @@
     animal._spiralRadius = 0;
     animal._spiralOriginX = null;
     animal._spiralOriginY = null;
+    animal._exploreGoal = null;
+    animal._exploreTimer = 0;
+    animal._waterStuckTimer = 0;
   }
 
   /** Max search radius that covers the full map from any point. */
@@ -583,28 +609,104 @@
   function effectiveSpeed(animal, speedMult) {
     speedMult = speedMult == null ? 1 : speedMult;
     let speed = Math.max(MIN_SPEED, animal.baseSpeed * speedMult);
-    // Species with waterSpeed (alligator): use that tier while in water before the global penalty
-    if (animal.waterSpeedKey && animal._inWater && SPEED[animal.waterSpeedKey]) {
-      speed = Math.max(MIN_SPEED, SPEED[animal.waterSpeedKey]);
-    }
-    // Water: 25% of current speed
     if (animal._inWater) {
-      speed *= WATER_SPEED_MULT;
+      // Turtles / alligators: double land speed in water (no global penalty)
+      if (animal.aquatic) {
+        speed = Math.max(MIN_SPEED, animal.baseSpeed * AQUATIC_WATER_SPEED_MULT * speedMult);
+      } else {
+        // Land animals: 25% of current speed
+        speed *= WATER_SPEED_MULT;
+      }
     }
     return Math.max(MIN_SPEED, speed);
   }
 
   /**
    * True when the animal may enter water: aquatic species, fleeing a nearby
-   * predator, or starving with food across the water.
+   * predator, starving, or stuck on a shoreline while hunger-searching.
    */
   function canCrossWater(animal, ctx) {
-    if (animal.waterSpeedKey) return true;
+    if (animal.aquatic || animal.waterSpeedKey) return true;
     if (animal.state === AI_STATE.FLEE && animal.fleeFrom && animal.fleeFrom.alive) {
       const d = Math.hypot(animal.x - animal.fleeFrom.x, animal.y - animal.fleeFrom.y);
       if (d <= WATER_DESPERATION_FLEE_DIST) return true;
     }
-    if (hungerRatio(animal) < WATER_DESPERATION_STARVE_RATIO && animal.target) {
+    // Starving animals may cross even before a food target is locked
+    if (hungerRatio(animal) < WATER_DESPERATION_STARVE_RATIO) {
+      return true;
+    }
+    // Shoreline pin: allow a temporary crossing so hunger-search can continue
+    if (
+      (animal._hungerSearch || animal._hunting) &&
+      (animal._waterStuckTimer || 0) >= WATER_STUCK_CROSS_SECONDS
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  /** Full base speed when stamina is maxed during hunger/hunt search. */
+  function hungerSearchSpeedMult(animal) {
+    const maxS = animal.maxStamina || STAMINA_MAX;
+    if (animal.stamina >= maxS) return 1;
+    return 0.55 + 0.45 * (animal.stamina / maxS);
+  }
+
+  /**
+   * Pick a dry (when possible) waypoint in a completely different part of the map.
+   */
+  function pickDistantExploreGoal(animal, ctx) {
+    const mapPx = (ctx && ctx.mapPixelSize) || 12800;
+    const pad = TILE_SIZE * 2;
+    const minDist = mapPx * HUNGER_EXPLORE_MIN_MAP_FRAC;
+    const rng = (ctx && ctx.rng) || { float: function () { return Math.random(); } };
+    let fallback = null;
+    for (let i = 0; i < 12; i++) {
+      const x = pad + rng.float() * (mapPx - pad * 2);
+      const y = pad + rng.float() * (mapPx - pad * 2);
+      const d = Math.hypot(x - animal.x, y - animal.y);
+      if (d < minDist) continue;
+      if (!fallback) fallback = { x: x, y: y };
+      if (ctx && ctx.isWater && ctx.isWater(x, y) && !canCrossWater(animal, ctx)) continue;
+      return { x: x, y: y };
+    }
+    if (fallback) return fallback;
+    // Opposite corner of the map from the animal's current position
+    return {
+      x: Math.max(pad, Math.min(mapPx - pad, mapPx - animal.x)),
+      y: Math.max(pad, Math.min(mapPx - pad, mapPx - animal.y)),
+    };
+  }
+
+  /**
+   * Try stepping along the shoreline toward a blocked goal instead of freezing.
+   * Returns true if a dry step was applied.
+   */
+  function tryShoreSlide(animal, tx, ty, dt, speedMult, ctx) {
+    const dx = tx - animal.x;
+    const dy = ty - animal.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const fx = dx / len;
+    const fy = dy / len;
+    // Perpendicular shore directions + slight forward bias
+    const candidates = [
+      { x: -fy, y: fx },
+      { x: fy, y: -fx },
+      { x: -fy * 0.7 + fx * 0.3, y: fx * 0.7 + fy * 0.3 },
+      { x: fy * 0.7 + fx * 0.3, y: -fx * 0.7 + fy * 0.3 },
+      { x: -fx, y: -fy },
+    ];
+    const speed = effectiveSpeed(animal, speedMult);
+    for (let i = 0; i < candidates.length; i++) {
+      const c = candidates[i];
+      const cl = Math.hypot(c.x, c.y) || 1;
+      const nx = animal.x + (c.x / cl) * speed * dt;
+      const ny = animal.y + (c.y / cl) * speed * dt;
+      if (ctx.isWater && ctx.isWater(nx, ny)) continue;
+      animal.vx = (c.x / cl) * speed;
+      animal.vy = (c.y / cl) * speed;
+      animal.x = nx;
+      animal.y = ny;
       return true;
     }
     return false;
@@ -621,23 +723,22 @@
     const goalChanged =
       !animal._pathGoal ||
       Math.hypot(animal._pathGoal.x - tx, animal._pathGoal.y - ty) > TILE_SIZE * 0.75;
-    if (
-      animal._path &&
-      animal._pathIndex < animal._path.length &&
-      !goalChanged &&
-      animal._pathTimer > 0
-    ) {
-      return animal._path;
+    const allowWater = canCrossWater(animal, ctx);
+    const allowChanged = !!animal._pathAllowWater !== !!allowWater;
+    if (!goalChanged && !allowChanged && animal._pathTimer > 0) {
+      if (animal._path && animal._pathIndex < animal._path.length) return animal._path;
+      // Cache empty (already there) and null (failed) until repath timer expires
+      if (animal._path && animal._path.length === 0) return animal._path;
+      if (animal._pathFailureCached) return null;
     }
 
     // Keep the old path when the frame path budget is spent (smooth FPS under load).
     if (ctx.pathBudget != null && ctx.pathBudget <= 0) {
       if (animal._path && animal._pathIndex < animal._path.length) return animal._path;
-      return null;
+      return animal._pathFailureCached ? null : animal._path;
     }
     if (ctx.pathBudget != null) ctx.pathBudget -= 1;
 
-    const allowWater = canCrossWater(animal, ctx);
     const maxNodes =
       (Wildborn.config && Wildborn.config.pathfindMaxNodes) || undefined;
     const path = Wildborn.pathfind.pathToPixel(
@@ -648,7 +749,9 @@
       ty,
       { allowWater: allowWater, maxNodes: maxNodes }
     );
-    animal._path = path || [];
+    // Keep null on failure so callers do not walk a straight line into water
+    animal._path = path;
+    animal._pathFailureCached = path == null;
     animal._pathIndex = 0;
     animal._pathGoal = { x: tx, y: ty };
     animal._pathTimer = PATH_REPATH_SECONDS;
@@ -661,6 +764,7 @@
     animal._pathIndex = 0;
     animal._pathGoal = null;
     animal._pathTimer = 0;
+    animal._pathFailureCached = false;
   }
 
   function moveToward(animal, tx, ty, dt, speedMult, ctx) {
@@ -682,11 +786,39 @@
         } else {
           waypoint = { x: tx, y: ty };
         }
-      } else if (!canCrossWater(animal, ctx) && ctx.isWater && ctx.isWater(tx, ty)) {
-        // No dry path — hold rather than enter water
-        animal.vx = 0;
-        animal.vy = 0;
-        return;
+      } else if (path && path.length === 0) {
+        // Already on the goal tile — step directly to the pixel target
+        waypoint = { x: tx, y: ty };
+      } else {
+        // path == null → A* failed (usually water blocking a dry-only search)
+        if (!canCrossWater(animal, ctx) && ctx.isWater && ctx.isWater(tx, ty)) {
+          // Goal is in water — slide along shore instead of freezing
+          animal._waterStuckTimer = (animal._waterStuckTimer || 0) + dt;
+          if (tryShoreSlide(animal, tx, ty, dt, speedMult, ctx)) return;
+          animal.vx = 0;
+          animal.vy = 0;
+          return;
+        }
+        if (!canCrossWater(animal, ctx)) {
+          // No dry path across water — slide shoreward rather than bee-line into the edge
+          animal._waterStuckTimer = (animal._waterStuckTimer || 0) + dt;
+          if (tryShoreSlide(animal, tx, ty, dt, speedMult, ctx)) return;
+          // Replan with water allowed once stuck long enough (canCrossWater flips)
+          if ((animal._waterStuckTimer || 0) >= WATER_STUCK_CROSS_SECONDS) {
+            clearPath(animal);
+            const wetPath = ensurePath(animal, tx, ty, ctx);
+            if (wetPath && wetPath.length) {
+              waypoint = wetPath[animal._pathIndex] || { x: tx, y: ty };
+            } else {
+              waypoint = { x: tx, y: ty };
+            }
+          } else {
+            animal.vx = 0;
+            animal.vy = 0;
+            return;
+          }
+        }
+        // Allowed to cross (or no water issue) — fall through to direct move
       }
     }
 
@@ -696,6 +828,7 @@
     if (len < 0.5) {
       animal.vx = 0;
       animal.vy = 0;
+      animal._waterStuckTimer = 0;
       return;
     }
     const speed = effectiveSpeed(animal, speedMult);
@@ -716,10 +849,17 @@
     ) {
       animal.x = prevX;
       animal.y = prevY;
+      animal._waterStuckTimer = (animal._waterStuckTimer || 0) + dt;
+      clearPath(animal);
+      if (tryShoreSlide(animal, tx, ty, dt, speedMult, ctx)) return;
       animal.vx = 0;
       animal.vy = 0;
-      clearPath(animal);
       return;
+    }
+
+    // Made progress on dry land / allowed water
+    if (Math.hypot(animal.x - prevX, animal.y - prevY) > 0.2) {
+      animal._waterStuckTimer = Math.max(0, (animal._waterStuckTimer || 0) - dt * 2);
     }
 
     // Splash particles when moving through water
@@ -733,24 +873,50 @@
     if (animal.stateTimer <= 0 || (animal.vx === 0 && animal.vy === 0)) {
       const angle = rng.float() * Math.PI * 2;
       let speed = Math.max(MIN_SPEED, animal.baseSpeed * 0.4);
-      if (animal._inWater) speed *= WATER_SPEED_MULT;
+      if (animal._inWater) {
+        speed = animal.aquatic
+          ? Math.max(MIN_SPEED, animal.baseSpeed * AQUATIC_WATER_SPEED_MULT * 0.4)
+          : speed * WATER_SPEED_MULT;
+      }
       animal.vx = Math.cos(angle) * speed;
       animal.vy = Math.sin(angle) * speed;
       animal.stateTimer = 1 + rng.float() * 2;
     }
 
-    // Soft water avoidance while wandering (unless desperate / alligator)
+    // Soft water avoidance while wandering (unless desperate / aquatic)
     let nx = animal.x + animal.vx * dt;
     let ny = animal.y + animal.vy * dt;
     if (ctx && ctx.isWater && ctx.isWater(nx, ny) && !canCrossWater(animal, ctx)) {
-      // Turn away from water
-      animal.vx = -animal.vx;
-      animal.vy = -animal.vy;
+      // Sample several dry escape headings instead of a reverse bounce-lock
+      let found = false;
+      const baseAng = Math.atan2(animal.vy, animal.vx);
+      const tryAngles = [
+        baseAng + Math.PI,
+        baseAng + Math.PI * 0.5,
+        baseAng - Math.PI * 0.5,
+        baseAng + Math.PI * 0.75,
+        baseAng - Math.PI * 0.75,
+        rng.float() * Math.PI * 2,
+        rng.float() * Math.PI * 2,
+      ];
+      const speed = Math.hypot(animal.vx, animal.vy) || Math.max(MIN_SPEED, animal.baseSpeed * 0.4);
+      for (let i = 0; i < tryAngles.length; i++) {
+        const ax = Math.cos(tryAngles[i]) * speed;
+        const ay = Math.sin(tryAngles[i]) * speed;
+        const tx = animal.x + ax * dt;
+        const ty = animal.y + ay * dt;
+        if (ctx.isWater(tx, ty)) continue;
+        animal.vx = ax;
+        animal.vy = ay;
+        nx = tx;
+        ny = ty;
+        found = true;
+        break;
+      }
       animal.stateTimer = 0.4 + rng.float() * 0.6;
-      nx = animal.x + animal.vx * dt;
-      ny = animal.y + animal.vy * dt;
-      if (ctx.isWater(nx, ny)) {
-        // Still wet — stay put this frame
+      if (!found) {
+        // Fully boxed by water — mark stuck so canCrossWater can eventually free them
+        animal._waterStuckTimer = (animal._waterStuckTimer || 0) + dt;
         animal.vx = 0;
         animal.vy = 0;
         animal.stateTimer = 0;
@@ -1185,11 +1351,8 @@
   }
 
   function updateSeekFood(animal, dt, ctx) {
-    // Expand detect radius while hunger-searching or while an omnivore is hunting prey
-    if (
-      (animal._hungerSearch && !animal._hunting) ||
-      (animal.diet === 'omnivore' && animal._hunting)
-    ) {
+    // Expand detect radius while hunger-searching or hunting map-wide
+    if (animal._hungerSearch || animal._hunting) {
       updateHungerSearchMovement(animal, dt, ctx);
     }
 
@@ -1199,19 +1362,9 @@
     }
 
     if (!animal.target) {
-      if (animal._hungerSearch && !animal._hunting) {
-        // Herbivores keep expanding; predators spiral
-        if (isPredator(animal) && animal.diet !== 'herbivore') {
-          updateSpiralSearch(animal, dt, ctx);
-        } else {
-          wander(animal, dt, ctx.rng, ctx);
-        }
-        return;
-      }
-      if (isPredator(animal) && animal._hunting) {
-        // Keep hunting until satiated — omnivores spiral across more of the map
-        if (animal.diet === 'omnivore') updateSpiralSearch(animal, dt, ctx);
-        else wander(animal, dt, ctx.rng, ctx);
+      if (animal._hungerSearch || animal._hunting) {
+        // No food in range — travel to a completely different part of the map
+        updateMapExploreSearch(animal, dt, ctx);
         return;
       }
       wander(animal, dt, ctx.rng, ctx);
@@ -1221,6 +1374,9 @@
       }
       return;
     }
+
+    // Have a food target — drop the distant explore waypoint
+    animal._exploreGoal = null;
 
     const t = animal.target;
     const range = t.kind === 'plant' || t.state === AI_STATE.DEAD ? EAT_RANGE : ATTACK_RANGE;
@@ -1235,45 +1391,49 @@
       return;
     }
 
-    // Pathfind with no max range — hunger/hunt search may cross the whole map
-    moveToward(animal, t.x, t.y, dt, 1, ctx);
+    // Pathfind with no max range — hunger/hunt search may cross the whole map.
+    // Full stamina → max speed while chasing food during search/hunt.
+    const speedMult =
+      animal._hungerSearch || animal._hunting ? hungerSearchSpeedMult(animal) : 1;
+    moveToward(animal, t.x, t.y, dt, speedMult, ctx);
   }
 
   /**
    * Herbivores: grow search radius +2 tiles/sec when nothing in sight.
-   * Omnivores: grow faster (+5 tiles/sec) while hunting / hunger-searching for prey.
-   * Predators: spiral is applied when still targetless (see updateSeekFood).
+   * Omnivores / hunting predators: grow faster while searching map-wide.
    */
   function updateHungerSearchMovement(animal, dt, ctx) {
-    if (animal.diet === 'herbivore' || animal.diet === 'omnivore') {
-      const cap = mapSearchCap(ctx);
-      const prev = animal._searchRadius || initialSearchRadius(animal);
-      const tilesPerSec =
-        animal.diet === 'omnivore' ? OMNIVORE_SEARCH_EXPAND_TILES_PER_SEC : 2;
-      animal._searchRadius = Math.min(cap, prev + tilesPerSec * TILE_SIZE * dt);
-    }
+    const cap = mapSearchCap(ctx);
+    const prev = animal._searchRadius || initialSearchRadius(animal);
+    let tilesPerSec = 2;
+    if (animal.diet === 'omnivore') tilesPerSec = OMNIVORE_SEARCH_EXPAND_TILES_PER_SEC;
+    else if (animal._hunting) tilesPerSec = 3;
+    animal._searchRadius = Math.min(cap, prev + tilesPerSec * TILE_SIZE * dt);
   }
 
-  /** Ever-widening spiral roam used by predators during hunger-search. */
+  /**
+   * Travel to distant map waypoints while hunger-/hunt-searching.
+   * Full stamina → max speed; goals stay far from the current position.
+   */
+  function updateMapExploreSearch(animal, dt, ctx) {
+    const goal = animal._exploreGoal;
+    const arrived =
+      goal && Math.hypot(goal.x - animal.x, goal.y - animal.y) < TILE_SIZE * 2.5;
+    animal._exploreTimer = (animal._exploreTimer || 0) - dt;
+    if (!goal || arrived || animal._exploreTimer <= 0) {
+      animal._exploreGoal = pickDistantExploreGoal(animal, ctx);
+      const span = HUNGER_EXPLORE_GOAL_MAX - HUNGER_EXPLORE_GOAL_MIN;
+      animal._exploreTimer =
+        HUNGER_EXPLORE_GOAL_MIN + (ctx.rng ? ctx.rng.float() * span : span * 0.5);
+      clearPath(animal);
+    }
+    const g = animal._exploreGoal;
+    moveToward(animal, g.x, g.y, dt, hungerSearchSpeedMult(animal), ctx);
+  }
+
+  /** @deprecated Kept for callers/tests — redirects to map-wide explore. */
   function updateSpiralSearch(animal, dt, ctx) {
-    if (animal._spiralOriginX == null) {
-      animal._spiralOriginX = animal.x;
-      animal._spiralOriginY = animal.y;
-    }
-    animal._spiralAngle = (animal._spiralAngle || 0) + dt * 1.35;
-    animal._spiralRadius = (animal._spiralRadius || TILE_SIZE * 2) + TILE_SIZE * 0.85 * dt;
-    const cap = mapSearchCap(ctx);
-    if (animal._spiralRadius > cap) {
-      // Restart spiral from current position once it covers the map
-      animal._spiralRadius = TILE_SIZE * 2;
-      animal._spiralOriginX = animal.x;
-      animal._spiralOriginY = animal.y;
-    }
-    const tx =
-      animal._spiralOriginX + Math.cos(animal._spiralAngle) * animal._spiralRadius;
-    const ty =
-      animal._spiralOriginY + Math.sin(animal._spiralAngle) * animal._spiralRadius;
-    moveToward(animal, tx, ty, dt, 0.75, ctx);
+    updateMapExploreSearch(animal, dt, ctx);
   }
 
   function isValidFoodTarget(animal, t) {
@@ -1292,16 +1452,9 @@
   }
 
   function foodDetectRange(animal) {
-    // Omnivores use an expanding map-wide radius while hunting or hunger-searching
-    if (animal.diet === 'omnivore' && (animal._hunting || animal._hungerSearch)) {
+    // Expanding map-wide detect radius while hunger-searching or hunting
+    if (animal._hungerSearch || animal._hunting) {
       return animal._searchRadius || initialSearchRadius(animal);
-    }
-    if (animal._hungerSearch && !animal._hunting) {
-      // Herbivores: expanding radius; predators: sight only (spiral explores)
-      if (animal.diet === 'herbivore') {
-        return animal._searchRadius || FOOD_DETECT_RANGE;
-      }
-      return FOOD_DETECT_RANGE;
     }
     return FOOD_DETECT_RANGE;
   }
@@ -1827,6 +1980,8 @@
     EAT_RANGE,
     EAT_RATE_PER_SEC,
     WATER_SPEED_MULT,
+    AQUATIC_WATER_SPEED_MULT,
+    WATER_STUCK_CROSS_SECONDS,
     SLEEP_ENTER_RATIO,
     SLEEP_WAKE_RATIO,
     SLEEP_IDLE_SECONDS,

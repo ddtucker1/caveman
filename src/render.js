@@ -149,7 +149,7 @@
     const screen = worldToScreen(camera, player.x, player.y);
     const cx = screen.x + player.w / 2;
     const cy = screen.y + player.h / 2;
-    const s = player.w; // 30 — 50% larger than original 20
+    const s = player.w; // hitbox / draw size (15)
     const facing = player.facingX >= 0 ? 1 : -1;
     const phase = player.walkPhase || 0;
     const swing = Math.sin(phase) * 0.55;

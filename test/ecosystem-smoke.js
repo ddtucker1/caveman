@@ -16,6 +16,7 @@ const files = [
   'src/plant.js',
   'src/animal.js',
   'src/ecosystem.js',
+  'src/player.js',
   'src/shapes.js',
   'src/renderShapes.js',
 ];
@@ -148,6 +149,14 @@ function assert(cond, msg) {
   assert(Wildborn.animal.PLANT_SIGHT_RANGE === 256, 'plant sight is 8 tiles (256px)');
   assert(Wildborn.animal.FOOD_DETECT_RANGE === 256, 'food detect matches plant sight');
   assert(Wildborn.animal.WATER_SPEED_MULT === 0.25, 'water speed is 25% of normal');
+  assert(Wildborn.animal.AQUATIC_WATER_SPEED_MULT === 2, 'aquatic water speed is 2× land');
+}
+
+// --- Unit: caveman hitbox ---
+{
+  assert(Wildborn.player.PLAYER_SIZE === 15, 'caveman hitbox is 15 (50% of prior 30)');
+  const p = Wildborn.player.createPlayer({ x: 0, y: 0 });
+  assert(p.w === 15 && p.h === 15, 'player spawn uses reduced hitbox');
 }
 
 // --- Unit: animal factory ---
@@ -472,6 +481,119 @@ function assert(cond, msg) {
   assert(
     wolfSearch.state === 'SEEK_FOOD' && wolfSearch._hungerSearch && !wolfSearch._hunting,
     'predator hunger-searches at ≤50% before hunt mode'
+  );
+
+  // Distant map exploration + max speed when stamina is full
+  rabbit.stamina = rabbit.maxStamina;
+  rabbit.x = 100;
+  rabbit.y = 100;
+  Wildborn.animal.updateAnimal(rabbit, 0.5, ctx);
+  assert(!!rabbit._exploreGoal, 'hunger-search picks a distant explore goal');
+  const exploreDist = Math.hypot(rabbit._exploreGoal.x - 100, rabbit._exploreGoal.y - 100);
+  assert(
+    exploreDist >= 12800 * 0.35,
+    'explore goal is in a completely different part of the map (' + Math.round(exploreDist) + 'px)'
+  );
+  const speed = Math.hypot(rabbit.vx, rabbit.vy);
+  assert(
+    speed >= rabbit.baseSpeed * 0.95,
+    'full stamina hunger-search uses max speed (' + speed.toFixed(1) + ' vs base ' + rabbit.baseSpeed + ')'
+  );
+}
+
+// --- Unit: turtles / alligators double speed in water ---
+{
+  const turtle = Wildborn.animal.createAnimal('turtle', 100, 100);
+  const gator = Wildborn.animal.createAnimal('alligator', 100, 100);
+  assert(turtle.aquatic === true, 'turtle is aquatic');
+  assert(gator.aquatic === true, 'alligator is aquatic');
+  assert(Wildborn.animal.canCrossWater(turtle, {}), 'turtle may cross water');
+  assert(Wildborn.animal.canCrossWater(gator, {}), 'alligator may cross water');
+
+  const landCtx = {
+    rng: createRng('aquatic-land'),
+    tickSeconds: 0.5,
+    isWater: () => false,
+    mapPixelSize: 12800,
+    findNearestPlant: () => null,
+    findNearestAnimal: () => null,
+    queryAnimals: () => [],
+    spawnSplash: () => {},
+  };
+  // Keep calories in the hunger-search band so AI stays on explore movement
+  turtle.calories = turtle.maxCalories * 0.4;
+  turtle.state = 'SEEK_FOOD';
+  turtle._hungerSearch = true;
+  turtle.stamina = turtle.maxStamina;
+  turtle._exploreGoal = { x: 5000, y: 100 };
+  turtle._exploreTimer = 10;
+  Wildborn.animal.updateAnimal(turtle, 0.2, landCtx);
+  const landSpeed = Math.hypot(turtle.vx, turtle.vy);
+
+  const waterCtx = Object.assign({}, landCtx, {
+    rng: createRng('aquatic-water'),
+    isWater: () => true,
+    spawnSplash: () => {},
+  });
+  turtle.x = 100;
+  turtle.y = 100;
+  turtle.calories = turtle.maxCalories * 0.4;
+  turtle.state = 'SEEK_FOOD';
+  turtle._hungerSearch = true;
+  turtle.stamina = turtle.maxStamina;
+  turtle._exploreGoal = { x: 5000, y: 100 };
+  turtle._exploreTimer = 10;
+  Wildborn.animal.updateAnimal(turtle, 0.2, waterCtx);
+  const waterSpeed = Math.hypot(turtle.vx, turtle.vy);
+  assert(
+    waterSpeed >= landSpeed * 1.9,
+    'turtle water speed ~2× land (' + waterSpeed.toFixed(1) + ' vs ' + landSpeed.toFixed(1) + ')'
+  );
+
+  gator.calories = gator.maxCalories * 0.25;
+  gator.state = 'SEEK_PREY';
+  gator._hunting = true;
+  gator.stamina = gator.maxStamina;
+  gator._exploreGoal = { x: 5000, y: 100 };
+  gator._exploreTimer = 10;
+  gator.x = 100;
+  gator.y = 100;
+  Wildborn.animal.updateAnimal(gator, 0.2, landCtx);
+  const gatorLand = Math.hypot(gator.vx, gator.vy);
+  gator.x = 100;
+  gator.y = 100;
+  gator.calories = gator.maxCalories * 0.25;
+  gator.state = 'SEEK_PREY';
+  gator._hunting = true;
+  gator.stamina = gator.maxStamina;
+  gator._exploreGoal = { x: 5000, y: 100 };
+  gator._exploreTimer = 10;
+  Wildborn.animal.updateAnimal(gator, 0.2, waterCtx);
+  const gatorWater = Math.hypot(gator.vx, gator.vy);
+  assert(
+    gatorWater >= gatorLand * 1.9,
+    'alligator water speed ~2× land (' + gatorWater.toFixed(1) + ' vs ' + gatorLand.toFixed(1) + ')'
+  );
+}
+
+// --- Unit: shoreline stuck recovery ---
+{
+  const deer = Wildborn.animal.createAnimal('deer', 100, 100);
+  deer.state = 'SEEK_FOOD';
+  deer._hungerSearch = true;
+  deer.stamina = deer.maxStamina;
+  deer._waterStuckTimer = Wildborn.animal.WATER_STUCK_CROSS_SECONDS;
+  assert(
+    Wildborn.animal.canCrossWater(deer, {}),
+    'hunger-searching animal stuck at water may cross after timeout'
+  );
+  // Starvation no longer requires a locked target
+  const rabbit = Wildborn.animal.createAnimal('rabbit', 100, 100);
+  rabbit.calories = rabbit.maxCalories * 0.1;
+  rabbit.target = null;
+  assert(
+    Wildborn.animal.canCrossWater(rabbit, {}),
+    'starving animal may cross water without a food target'
   );
 }
 
