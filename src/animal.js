@@ -29,8 +29,13 @@
   const MIN_SPEED = 0.5;
   /** Animals on water move at 50% of normal speed (stacks with other modifiers). */
   const WATER_SPEED_MULT = 0.5;
-  /** Turtles / alligators (aquatic) move at 2× land speed while in water. */
+  /**
+   * Aquatic predators (alligators) move at 2× land speed while in water.
+   * Turtles keep land speed in water — equally comfortable on both.
+   */
   const AQUATIC_WATER_SPEED_MULT = 2;
+  /** Turtle water speed relative to land (1 = enjoy water as much as land). */
+  const TURTLE_WATER_SPEED_MULT = 1;
   const TILE_SIZE = 32;
   /** Herbivores "see" plants within this many tiles (8 × 32 = 256px). */
   const PLANT_SIGHT_TILES = 8;
@@ -140,6 +145,8 @@
       maxGroupSize: 1,
       speed: 'very_slow',
       aquatic: true,
+      /** Same speed on land and water — equally at home in both. */
+      waterSpeedMult: TURTLE_WATER_SPEED_MULT,
       caloriesNeededPerDay: 40,
       maxCalories: 80,
       maxHealth: 150,
@@ -309,9 +316,12 @@
   const WATER_STUCK_CROSS_SECONDS = 1.25;
   /** Minimum map fraction to travel when hunger-searching distant areas. */
   const HUNGER_EXPLORE_MIN_MAP_FRAC = 0.35;
-  /** Refresh distant explore goals this often while searching. */
-  const HUNGER_EXPLORE_GOAL_MIN = 8;
-  const HUNGER_EXPLORE_GOAL_MAX = 14;
+  /**
+   * At ≤50% calories, commit to running one direction longer so animals
+   * observe new parts of the map before picking another heading.
+   */
+  const HUNGER_EXPLORE_GOAL_MIN = 22;
+  const HUNGER_EXPLORE_GOAL_MAX = 40;
   /** Poop while roaming: every 5–10s, fade after 30s. */
   const POOP_INTERVAL_MIN = 5;
   const POOP_INTERVAL_MAX = 10;
@@ -427,9 +437,16 @@
 
       speedKey: def.speed,
       baseSpeed: baseSpeed,
-      /** Turtles / alligators: double speed in water and free water crossing. */
+      /** Aquatic species cross water freely; waterSpeedMult controls swim vs land pace. */
       aquatic: !!(def.aquatic || def.waterSpeed),
       waterSpeedKey: def.waterSpeed || null,
+      /** Relative water speed (turtle=1 equal to land; alligator defaults to 2×). */
+      waterSpeedMult:
+        def.waterSpeedMult != null
+          ? def.waterSpeedMult
+          : def.aquatic || def.waterSpeed
+            ? AQUATIC_WATER_SPEED_MULT
+            : 1,
       attackPower: def.attackPower || 5,
       // Predators never flee; herbivores default to fleeing when hit.
       defense: def.defense || (isPred ? 'none' : 'flee'),
@@ -607,13 +624,21 @@
     return dx * dx + dy * dy;
   }
 
+  function aquaticWaterSpeedMult(animal) {
+    if (animal.waterSpeedMult != null) return animal.waterSpeedMult;
+    return AQUATIC_WATER_SPEED_MULT;
+  }
+
   function effectiveSpeed(animal, speedMult) {
     speedMult = speedMult == null ? 1 : speedMult;
     let speed = Math.max(MIN_SPEED, animal.baseSpeed * speedMult);
     if (animal._inWater) {
-      // Turtles / alligators: double land speed in water (no global penalty)
+      // Aquatic: per-species water pace (turtle = land speed; alligator = 2×)
       if (animal.aquatic) {
-        speed = Math.max(MIN_SPEED, animal.baseSpeed * AQUATIC_WATER_SPEED_MULT * speedMult);
+        speed = Math.max(
+          MIN_SPEED,
+          animal.baseSpeed * aquaticWaterSpeedMult(animal) * speedMult
+        );
       } else {
         // Land animals: 50% of current speed
         speed *= WATER_SPEED_MULT;
@@ -876,7 +901,7 @@
       let speed = Math.max(MIN_SPEED, animal.baseSpeed * 0.4);
       if (animal._inWater) {
         speed = animal.aquatic
-          ? Math.max(MIN_SPEED, animal.baseSpeed * AQUATIC_WATER_SPEED_MULT * 0.4)
+          ? Math.max(MIN_SPEED, animal.baseSpeed * aquaticWaterSpeedMult(animal) * 0.4)
           : speed * WATER_SPEED_MULT;
       }
       animal.vx = Math.cos(angle) * speed;
@@ -1209,6 +1234,34 @@
     }
   }
 
+  /**
+   * Nearest living predator or omnivore within range.
+   * Herbivores flee from both on sight.
+   */
+  function findPredatorThreat(animal, ctx, range) {
+    if (!ctx || !ctx.findNearestAnimal) return null;
+    return ctx.findNearestAnimal(animal.x, animal.y, range, function (o) {
+      return (
+        o.alive &&
+        isPredator(o) &&
+        o.diet !== 'herbivore' &&
+        o.id !== animal.id
+      );
+    });
+  }
+
+  /** Enter FLEE from a seen predator/omnivore. */
+  function beginFleeFromThreat(animal, threat) {
+    animal.idleAccum = 0;
+    animal.target = null;
+    clearEatingVisuals(animal);
+    clearPath(animal);
+    animal.state = AI_STATE.FLEE;
+    animal.fleeFrom = threat;
+    animal.stateTimer = 2.5;
+    animal._fleeExhausted = animal.stamina <= 0;
+  }
+
   function updateIdle(animal, dt, ctx) {
     // Predators use ROAM instead of IDLE
     if (isPredator(animal) && animal.diet !== 'herbivore') {
@@ -1216,22 +1269,11 @@
       return;
     }
 
-    // Threat scan (herbivores)
+    // Threat scan — herbivores run from predators and omnivores on sight
     if (animal.diet === 'herbivore') {
-      const threat = ctx.findNearestAnimal(
-        animal.x,
-        animal.y,
-        FLEE_ENTER_RANGE,
-        function (o) {
-          return o.alive && isPredator(o) && o.diet !== 'herbivore' && o.id !== animal.id;
-        }
-      );
+      const threat = findPredatorThreat(animal, ctx, FLEE_ENTER_RANGE);
       if (threat) {
-        animal.idleAccum = 0;
-        animal.state = AI_STATE.FLEE;
-        animal.fleeFrom = threat;
-        animal.stateTimer = 2.5;
-        animal._fleeExhausted = animal.stamina <= 0;
+        beginFleeFromThreat(animal, threat);
         return;
       }
     }
@@ -1299,21 +1341,11 @@
       return;
     }
 
-    const threat = ctx.findNearestAnimal(
-      animal.x,
-      animal.y,
-      SLEEP_WAKE_PREDATOR_RANGE,
-      function (o) {
-        return o.alive && isPredator(o) && o.diet !== 'herbivore' && o.id !== animal.id;
-      }
-    );
+    const threat = findPredatorThreat(animal, ctx, SLEEP_WAKE_PREDATOR_RANGE);
     if (threat) {
       wakeAnimal(animal);
       if (animal.diet === 'herbivore') {
-        animal.state = AI_STATE.FLEE;
-        animal.fleeFrom = threat;
-        animal.stateTimer = 2.5;
-        animal._fleeExhausted = animal.stamina <= 0;
+        beginFleeFromThreat(animal, threat);
       }
       return;
     }
@@ -1367,12 +1399,21 @@
   }
 
   function updateSeekFood(animal, dt, ctx) {
+    // Herbivores abandon food search and flee when they see a predator/omnivore
+    if (animal.diet === 'herbivore') {
+      const threat = findPredatorThreat(animal, ctx, FLEE_ENTER_RANGE);
+      if (threat) {
+        beginFleeFromThreat(animal, threat);
+        return;
+      }
+    }
+
     // Expand detect radius while hunger-searching or hunting map-wide
     if (animal._hungerSearch || animal._hunting) {
       updateHungerSearchMovement(animal, dt, ctx);
     }
 
-    // Predators seek herbivores (or corpses); herbivores seek plants; omnivores do both
+    // Predators seek herbivores (or corpses); herbivores seek plants only; omnivores do both
     if (!animal.target || !isValidFoodTarget(animal, animal.target)) {
       animal.target = findFoodTarget(animal, ctx);
     }
@@ -1456,6 +1497,8 @@
     if (!t) return false;
     if (t.kind === 'plant') return t.alive && t.calories > 0;
     if (t.kind === 'animal') {
+      // Herbivores never eat animals (living or dead) — plants only.
+      if (animal.diet === 'herbivore') return false;
       if (t.state === AI_STATE.DEAD) return t.corpseCalories > 0;
       if (!t.alive) return false;
       // Live prey
@@ -1478,8 +1521,8 @@
   function findFoodTarget(animal, ctx) {
     const detect = foodDetectRange(animal);
 
-    // Prefer corpses if very hungry
-    if (isPredator(animal) || isHungry(animal)) {
+    // Predators / omnivores prefer corpses; herbivores never eat dead animals.
+    if (isPredator(animal)) {
       const corpse = ctx.findNearestAnimal(
         animal.x,
         animal.y,
@@ -1488,7 +1531,7 @@
           return o.state === AI_STATE.DEAD && o.corpseCalories > 0;
         }
       );
-      if (corpse && (isPredator(animal) || isHungry(animal))) return corpse;
+      if (corpse) return corpse;
     }
 
     if (
@@ -2007,7 +2050,11 @@
     EAT_RATE_PER_SEC,
     WATER_SPEED_MULT,
     AQUATIC_WATER_SPEED_MULT,
+    TURTLE_WATER_SPEED_MULT,
     WATER_STUCK_CROSS_SECONDS,
+    HUNGER_EXPLORE_GOAL_MIN,
+    HUNGER_EXPLORE_GOAL_MAX,
+    HUNGER_EXPLORE_MIN_MAP_FRAC,
     SLEEP_ENTER_RATIO,
     SLEEP_WAKE_RATIO,
     SLEEP_IDLE_SECONDS,
