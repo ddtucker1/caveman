@@ -160,8 +160,9 @@ function assert(cond, msg) {
   assert(wolf.state === 'ROAM', 'predators spawn in ROAM state');
   assert(wolf.spawnX === 0 && wolf.spawnY === 0, 'predator records spawn territory point');
   const cub = Wildborn.animal.createAnimal('deer', 0, 0, { isOffspring: true });
-  assert(!cub.isAdult && cub.calories === cub.maxCalories * 0.2, 'offspring start at 20% calories');
-  assert(cub.growth === 0.2 && cub.size === cub.baseSize * 0.2, 'offspring start at 20% adult size');
+  assert(cub.isAdult && cub.health === cub.maxHealth, 'offspring born as full-health adults');
+  assert(cub.growth === 1 && cub.size === cub.baseSize, 'offspring spawn at full adult size');
+  assert(cub.breedingCooldown === Wildborn.animal.BREED_COOLDOWN, 'offspring start on breed cooldown');
   assert(!HERBIVORE_SPECIES.chicken, 'chicken species removed');
   assert(!Wildborn.animal.AI_STATE.SEEK_MATE && !Wildborn.animal.AI_STATE.BREEDING, 'mate-seeking states removed');
 }
@@ -668,14 +669,15 @@ function assert(cond, msg) {
   const deerA = Wildborn.animal.createAnimal('deer', 100, 100);
   deerA.calories = deerA.maxCalories;
   deerA.breedingCooldown = 0;
-  assert(Wildborn.animal.canBreed(deerA), 'well-fed adult with cooldown 0 can breed');
-  assert(Wildborn.animal.BREED_COOLDOWN === 2400, 'breed cooldown is 1200s (2400 ticks)');
+  assert(Wildborn.animal.canBreed(deerA), 'well-fed animal with cooldown 0 can breed');
+  assert(Wildborn.animal.BREED_COOLDOWN === 1200, 'breed cooldown is 600s / 10 min (1200 ticks)');
   assert(Wildborn.animal.BREED_CALORIE_RATIO === 0.8, 'breed requires ≥80% calories');
   const kids = Wildborn.animal.breed(deerA);
   assert(kids.length === 1, 'breed() yields exactly 1 offspring (' + kids.length + ')');
-  assert(kids[0].species === 'deer' && !kids[0].isAdult, 'offspring is a juvenile deer');
+  assert(kids[0].species === 'deer' && kids[0].isAdult, 'offspring is an adult deer');
+  assert(kids[0].health === kids[0].maxHealth, 'offspring born at full health');
   assert(kids[0].x === deerA.x && kids[0].y === deerA.y, 'offspring spawns at parent location');
-  assert(kids[0].growth === 0.2 && kids[0].size === kids[0].baseSize * 0.2, 'offspring starts at 20% size');
+  assert(kids[0].growth === 1 && kids[0].size === kids[0].baseSize, 'offspring starts at full size');
   assert(deerA.breedingCooldown === Wildborn.animal.BREED_COOLDOWN, 'breeding cooldown applied');
   assert(!Wildborn.animal.canBreed(deerA), 'parent cannot breed again until cooldown ends');
 

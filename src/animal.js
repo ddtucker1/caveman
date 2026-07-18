@@ -264,10 +264,8 @@
   const ALL_SPECIES = Object.assign({}, HERBIVORE_SPECIES, PREDATOR_SPECIES);
 
   // Timing / thresholds
-  /** Ticks for juvenile growth 20% → 100% at +1%/tick. */
-  const ADULT_AGE = 80;
-  /** 1200s reproduction cooldown at 0.5s/tick → 2400 ticks. */
-  const BREED_COOLDOWN = 2400;
+  /** 600s (10 min) reproduction cooldown at 0.5s/tick → 1200 ticks. */
+  const BREED_COOLDOWN = 1200;
   /** Calories must be ≥ 80% of max to reproduce. */
   const BREED_CALORIE_RATIO = 0.8;
   /** Enter SEARCHING_FOR_FOOD at ≤50% calories. */
@@ -360,8 +358,9 @@
 
     const isOffspring = !!opts.isOffspring;
     const maxCal = def.maxCalories;
-    // Adults spawn well-fed so the ecosystem stabilizes before the first hunt.
-    const startCal = isOffspring ? maxCal * 0.2 : maxCal * 0.85 + Math.random() * maxCal * 0.1;
+    // Spawn well-fed so the ecosystem stabilizes before the first hunt.
+    // Animals have no age — born as full-health adults.
+    const startCal = maxCal * 0.85 + Math.random() * maxCal * 0.1;
 
     const baseSpeed = Math.max(MIN_SPEED, SPEED[def.speed] || SPEED.medium);
     const isPred = def.diet === 'predator' || def.diet === 'omnivore';
@@ -383,18 +382,17 @@
       calories: startCal,
       maxCalories: maxCal,
       caloriesNeededPerDay: def.caloriesNeededPerDay,
-      health: isOffspring ? def.maxHealth * 0.4 : def.maxHealth,
+      health: def.maxHealth,
       maxHealth: def.maxHealth,
       stamina: STAMINA_MAX,
       maxStamina: STAMINA_MAX,
 
-      age: isOffspring ? 0 : ADULT_AGE + Math.floor(Math.random() * 20),
       /** Per-animal reproduction cooldown in ticks (persists with animal state). */
       breedingCooldown: isOffspring
         ? BREED_COOLDOWN
         : Math.floor(Math.random() * BREED_COOLDOWN),
-      growth: isOffspring ? 0.2 : 1, // 20% → 100% adult size
-      isAdult: !isOffspring,
+      growth: 1,
+      isAdult: true,
 
       state: isPred ? AI_STATE.ROAM : AI_STATE.IDLE,
       stateTimer: 0,
@@ -441,7 +439,7 @@
       color: def.color,
       accent: def.accent || null,
       baseSize: def.size,
-      size: isOffspring ? def.size * 0.2 : def.size,
+      size: def.size,
 
       attackCooldown: 0,
       packCallTimer: 0, // seconds remaining for pack to join
@@ -491,11 +489,10 @@
     return a.diet === 'predator' || a.diet === 'omnivore';
   }
 
-  /** Ready to reproduce asexually: adult, calories ≥ 80%, cooldown expired. */
+  /** Ready to reproduce asexually: calories ≥ 80%, cooldown expired. */
   function canBreed(a) {
     return (
       a.alive &&
-      a.isAdult &&
       a.state !== AI_STATE.DEAD &&
       a.breedingCooldown <= 0 &&
       a.calories >= a.maxCalories * BREED_CALORIE_RATIO
@@ -581,10 +578,6 @@
     if (animal.special === 'ambush' && animal._inWater) {
       speed = Math.max(MIN_SPEED, SPEED.fast);
     }
-    // Offspring follow a bit slower
-    if (!animal.isAdult) speed *= 0.7;
-    // Growth scale slightly affects speed
-    speed *= 0.7 + 0.3 * animal.growth;
     // Water: 25% of current speed (alligators still pay the water mult after land-equivalent)
     if (animal._inWater) {
       speed *= WATER_SPEED_MULT;
@@ -827,7 +820,7 @@
   // ---------------------------------------------------------------------------
 
   /**
-   * Continuous update (movement & timed effects). Discrete hunger/age happen in tickAnimal.
+   * Continuous update (movement & timed effects). Discrete hunger/reproduction happen in tickAnimal.
    * @param {object} animal
    * @param {number} dt
    * @param {object} ctx  ecosystem context (grids, rng, world helpers)
@@ -847,22 +840,6 @@
     // Water flag for alligator
     if (ctx.isWater) {
       animal._inWater = ctx.isWater(animal.x, animal.y);
-    }
-
-    // Offspring follow nearest adult of same species
-    if (!animal.isAdult) {
-      const adult = ctx.findNearestAnimal(
-        animal.x,
-        animal.y,
-        220,
-        function (o) {
-          return o.alive && o.isAdult && o.species === animal.species && o.id !== animal.id;
-        }
-      );
-      if (adult) {
-        moveToward(animal, adult.x, adult.y, dt, 0.85, ctx);
-        return;
-      }
     }
 
     // Predator hunger gate: hunt only at ≤30%, roam above that until 80% after a hunt
@@ -1747,7 +1724,7 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Discrete tick (hunger, growth, eating calories, asexual reproduction)
+  // Discrete tick (hunger, eating calories, asexual reproduction)
   // ---------------------------------------------------------------------------
 
   /**
@@ -1821,18 +1798,6 @@
     animal.calories -= drain;
 
     updateStamina(animal);
-
-    // Age / growth — juveniles start at 20% size, +1% per tick until adult
-    animal.age += 1;
-    if (!animal.isAdult) {
-      animal.growth = Math.min(1, animal.growth + 0.01);
-      animal.size = animal.baseSize * animal.growth;
-      if (animal.growth >= 1) {
-        animal.isAdult = true;
-        animal.growth = 1;
-        animal.size = animal.baseSize;
-      }
-    }
 
     if (animal.breedingCooldown > 0) animal.breedingCooldown -= 1;
 
@@ -1931,7 +1896,6 @@
     HERBIVORE_SPECIES,
     PREDATOR_SPECIES,
     ALL_SPECIES,
-    ADULT_AGE,
     BREED_COOLDOWN,
     BREED_CALORIE_RATIO,
     HUNGER_SEEK_RATIO,
