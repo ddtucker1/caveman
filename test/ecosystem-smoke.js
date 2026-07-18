@@ -697,8 +697,61 @@ function assert(cond, msg) {
     'ecosystem asexual path produces offspring (' + eco.animals.length + ' animals, deer=' + afterStats.herbivores.deer + ')'
   );
   assert(parent.breedingCooldown > 0, 'parent cooldown set after ecosystem reproduction');
+  assert(Wildborn.config.maxAnimals === 120, 'default maxAnimals soft cap is 120');
 
   console.log('\nFinal stats:', JSON.stringify(afterStats, null, 2));
+}
+
+// --- Unit: population soft-cap blocks ecosystem breeding ---
+{
+  const world = createWorld('pop-cap');
+  world.ensureMapLoaded();
+  const eco = createEcosystem({
+    world: world,
+    rng: createRng('pop-cap'),
+    config: Object.assign({}, Wildborn.config, { maxAnimals: 63 }),
+    origin: { x: MAP_PIXEL_SIZE / 2, y: MAP_PIXEL_SIZE / 2 },
+  });
+  for (let i = 0; i < eco.animals.length; i++) {
+    const a = eco.animals[i];
+    if (!a.alive || a.state === AI_STATE.DEAD) continue;
+    a.calories = a.maxCalories;
+    a.breedingCooldown = 0;
+  }
+  const before = eco.animals.length;
+  for (let i = 0; i < 30; i++) {
+    eco.update(1 / 30, { x: MAP_PIXEL_SIZE / 2, y: MAP_PIXEL_SIZE / 2 });
+  }
+  assert(
+    eco.animals.length <= Math.max(before, 63),
+    'population soft-cap blocks breeding at maxAnimals (' + eco.animals.length + ')'
+  );
+  assert(eco.getDebugStats().maxAnimals === 63, 'debug stats expose maxAnimals');
+}
+
+// --- Unit: pathfinder heap still finds short land paths ---
+{
+  const world = createWorld('path-heap');
+  world.ensureMapLoaded();
+  let a = null;
+  let b = null;
+  for (let ty = 0; ty < MAP_TILES && !b; ty++) {
+    for (let tx = 0; tx < MAP_TILES; tx++) {
+      const tile = world.getTile(tx, ty);
+      if (!world.isLand(tile)) continue;
+      if (!a) a = { tx, ty };
+      else if (Math.abs(tx - a.tx) + Math.abs(ty - a.ty) > 4) {
+        b = { tx, ty };
+        break;
+      }
+    }
+  }
+  assert(a && b, 'found land tiles for heap path test');
+  const path = Wildborn.pathfind.findPath(world, a.tx, a.ty, b.tx, b.ty, {
+    allowWater: false,
+    maxNodes: 2000,
+  });
+  assert(path && path.length >= 1, 'heap A* finds short path (' + (path && path.length) + ')');
 }
 
 // --- Ensure no chicken/egg references remain in source ---

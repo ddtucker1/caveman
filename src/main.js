@@ -593,7 +593,8 @@
     }
 
     if (game.ecosystem && config.ecosystemEnabled) {
-      game.ecosystem.update(step);
+      // Pass player focus so far animals can use cheaper sim LOD.
+      game.ecosystem.update(step, game.player);
       game.hoverEntity = pickEntityAt(
         game.ecosystem,
         game.camera,

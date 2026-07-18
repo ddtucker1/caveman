@@ -604,6 +604,7 @@
   /**
    * Ensure animal has a fresh grid path toward (tx, ty).
    * Uses A* on the 400×400 map; water only when desperate / alligator.
+   * Honors per-frame pathfinding budget from the ecosystem context.
    */
   function ensurePath(animal, tx, ty, ctx) {
     if (!ctx || !ctx.world || !Wildborn.pathfind) return null;
@@ -620,14 +621,23 @@
       return animal._path;
     }
 
+    // Keep the old path when the frame path budget is spent (smooth FPS under load).
+    if (ctx.pathBudget != null && ctx.pathBudget <= 0) {
+      if (animal._path && animal._pathIndex < animal._path.length) return animal._path;
+      return null;
+    }
+    if (ctx.pathBudget != null) ctx.pathBudget -= 1;
+
     const allowWater = canCrossWater(animal, ctx);
+    const maxNodes =
+      (Wildborn.config && Wildborn.config.pathfindMaxNodes) || undefined;
     const path = Wildborn.pathfind.pathToPixel(
       ctx.world,
       animal.x,
       animal.y,
       tx,
       ty,
-      { allowWater: allowWater }
+      { allowWater: allowWater, maxNodes: maxNodes }
     );
     animal._path = path || [];
     animal._pathIndex = 0;
@@ -1833,7 +1843,11 @@
     }
 
     // Asexual reproduction: calorie ≥ 80% and cooldown expired → spawn 1 offspring
-    if (canBreed(animal)) {
+    // Ecosystem may block via canSpawnOffspring when at the soft population cap.
+    if (
+      canBreed(animal) &&
+      (!ctx.canSpawnOffspring || ctx.canSpawnOffspring())
+    ) {
       result.offspring = breed(animal);
     }
 

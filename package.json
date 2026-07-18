@@ -1,0 +1,41 @@
+{
+  "name": "wildborn",
+  "version": "1.0.0",
+  "description": "Wildborn — procedurally evolving 2D survival (standalone desktop)",
+  "main": "electron/main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "test": "node test/ecosystem-smoke.js",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "build": {
+    "appId": "com.wildborn.game",
+    "productName": "Wildborn",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "index.html",
+      "src/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "linux": {
+      "target": ["AppImage", "dir"],
+      "category": "Game"
+    },
+    "win": {
+      "target": ["portable", "dir"]
+    },
+    "mac": {
+      "target": ["dmg", "dir"],
+      "category": "public.app-category.games"
+    }
+  },
+  "devDependencies": {
+    "electron": "^37.2.0",
+    "electron-builder": "^26.0.12"
+  }
+}
