@@ -92,9 +92,9 @@ function assert(cond, msg) {
   const taken = consumePlant(p, 100);
   assert(taken === 10 && !p.alive, 'consumePlant depletes and kills plant (stays in memory)');
   assert(p.growthPaused === true, 'eating pauses plant growth');
-  assert(p.respawnTimer === RESPAWN_DELAY_TICKS, 'respawn timer starts at 300s (600 ticks)');
-  assert(RESPAWN_DELAY_TICKS === 600, 'RESPAWN_DELAY_TICKS is 600');
-  assert(Wildborn.plant.RESPAWN_DELAY_SECONDS === 300, 'RESPAWN_DELAY_SECONDS is 300');
+  assert(p.respawnTimer === RESPAWN_DELAY_TICKS, 'respawn timer starts at 1200s (2400 ticks)');
+  assert(RESPAWN_DELAY_TICKS === 2400, 'RESPAWN_DELAY_TICKS is 2400');
+  assert(Wildborn.plant.RESPAWN_DELAY_SECONDS === 1200, 'RESPAWN_DELAY_SECONDS is 1200');
   // Fast-forward respawn
   p.respawnTimer = 1;
   updatePlant(p, () => ({ x: 50, y: 50 }));

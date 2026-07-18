@@ -1,6 +1,6 @@
 /**
  * Ecosystem plants — grow calories over time, eaten by herbivores (and bears).
- * When depleted they become invisible, sprout for 300s, then teleport to a
+ * When depleted they become invisible, sprout for 1200s, then teleport to a
  * random land tile at 50% max calories (entity stays in memory).
  * Growth pauses the moment any animal starts eating until respawn.
  */
@@ -64,9 +64,9 @@
 
   const SPECIES_LIST = Object.keys(PLANT_SPECIES);
   const START_CALORIES = 10;
-  /** 300 seconds (5 min) at 0.5s/tick → 600 ticks. */
-  const RESPAWN_DELAY_SECONDS = 300;
-  const RESPAWN_DELAY_TICKS = 600;
+  /** 1200 seconds (20 min) at 0.5s/tick → 2400 ticks. */
+  const RESPAWN_DELAY_SECONDS = 1200;
+  const RESPAWN_DELAY_TICKS = 2400;
   /** Fraction of max calories restored on respawn. */
   const RESPAWN_CALORIE_RATIO = 0.5;
 
@@ -133,7 +133,7 @@
 
   /**
    * Consume up to `amount` calories. Returns calories actually eaten.
-   * Marks plant dead (starts 300s respawn) when calories hit 0 — stays in memory.
+   * Marks plant dead (starts 1200s respawn) when calories hit 0 — stays in memory.
    * First bite also pauses growth for the rest of this life cycle.
    */
   function consumePlant(plant, amount) {
@@ -152,7 +152,7 @@
 
   /**
    * One ecosystem tick: grow if alive and not being/been eaten, or advance
-   * 300s respawn cooldown.
+   * 1200s (20 min) respawn cooldown.
    * @param {object} plant
    * @param {function(number,number):{x:number,y:number}|null} findRespawnSpot
    */
