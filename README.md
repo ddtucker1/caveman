@@ -17,17 +17,44 @@ This build therefore also includes gameplay/engine caps that *do* protect frame 
 - Per-frame A\* pathfinding budget + binary-heap pathfinder
 - Cheaper spatial-grid rebuilds and throttled minimap entity dots
 
-## Run as a desktop app
+## Play (double-click)
+
+### Packaged executable (recommended)
+
+Build a standalone app you can double-click with no Node install:
+
+```bash
+npm install
+npm run dist          # current OS
+# or:
+npm run dist:win      # Windows portable .exe
+npm run dist:linux    # Linux AppImage
+npm run dist:mac      # macOS .dmg
+```
+
+Then open the file in `dist/`:
+
+| Platform | File |
+|----------|------|
+| Windows | `Wildborn-1.0.0-portable.exe` |
+| Linux | `Wildborn-1.0.0-linux.AppImage` |
+| macOS | `Wildborn-1.0.0-mac.dmg` |
+
+Double-click it → click **Start Game** on the menu to begin a new world.
+
+### From source (dev)
+
+Double-click one of these launchers (installs deps on first run, then opens the game):
+
+- **Windows:** `Play-Wildborn.bat`
+- **macOS:** `Play-Wildborn.command` (if macOS blocks it: right-click → Open)
+- **Linux:** `Play-Wildborn.sh` (or `Play-Wildborn.desktop`)
+
+Or from a terminal:
 
 ```bash
 npm install
 npm start
-```
-
-Optional packaged builds (AppImage / portable / dmg):
-
-```bash
-npm run dist
 ```
 
 ## Run in a browser (still supported)

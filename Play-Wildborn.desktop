@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Wildborn
+Comment=Start a new Wildborn game
+Exec=bash -c 'cd "$(dirname "%k")" && ./Play-Wildborn.sh'
+Path=
+Terminal=false
+Categories=Game;
+StartupNotify=true
