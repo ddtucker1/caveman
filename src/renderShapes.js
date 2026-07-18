@@ -234,19 +234,6 @@
       sy *= 1 - 0.03 * pant;
     }
 
-    // Predator stomach rumble when calories drop below 30%
-    const rumbleDef = Wildborn.shapes.getSpeciesDef(entityType);
-    if (rumbleDef && rumbleDef.category === 'predator' && state !== 'DEAD') {
-      const maxCal = opts.maxCalories != null ? opts.maxCalories : 1;
-      const cal = opts.calories != null ? opts.calories : maxCal;
-      if (maxCal > 0 && cal / maxCal < 0.3) {
-        const rumble = Math.sin(t * 13);
-        ox += rumble * 0.55;
-        oy += Math.sin(t * 17) * 0.3;
-        sx *= 1 + 0.025 * rumble;
-      }
-    }
-
     // Rabbit ear twitch encoded as slight vertical ear offset via opts
     opts._earTwitch = Math.sin(t * 6) > 0.92 ? -1.5 : 0;
     // Lizard tongue

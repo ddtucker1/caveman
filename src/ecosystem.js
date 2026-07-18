@@ -292,9 +292,12 @@
     /**
      * Cheap far-LOD step: keep sliding along an existing path / velocity
      * without AI decisions or new A* searches.
+     * Non-aquatic animals soft-reject water so far LOD cannot pin them in lakes.
      */
     function cheapMoveAnimal(animal, dt) {
       if (animal.state === AI_STATE.DEAD) return;
+      const prevX = animal.x;
+      const prevY = animal.y;
       if (animal._path && animal._pathIndex < animal._path.length) {
         const wp = animal._path[animal._pathIndex];
         const dx = wp.x - animal.x;
@@ -311,11 +314,25 @@
         animal.vx = (dx / len) * speed;
         animal.vy = (dy / len) * speed;
         animal.facingRight = dx >= 0;
-        return;
-      }
-      if (animal.vx || animal.vy) {
+      } else if (animal.vx || animal.vy) {
         animal.x += animal.vx * dt;
         animal.y += animal.vy * dt;
+      } else {
+        return;
+      }
+
+      if (
+        !animal.aquatic &&
+        !animal.waterSpeedKey &&
+        world.isSlow(world.getTileAtPixel(animal.x, animal.y))
+      ) {
+        animal.x = prevX;
+        animal.y = prevY;
+        animal.vx = 0;
+        animal.vy = 0;
+        animal._path = null;
+        animal._pathIndex = 0;
+        animal._waterStuckTimer = (animal._waterStuckTimer || 0) + dt;
       }
     }
 
