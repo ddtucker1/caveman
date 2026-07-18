@@ -375,6 +375,112 @@ function assert(cond, msg) {
   }
 }
 
+// --- Unit: corpse yield 100% + predators eat to full ---
+{
+  function corpseEatCtx(extras) {
+    return Object.assign(
+      {
+        rng: createRng('corpse-eat'),
+        tickSeconds: 0.5,
+        world: createWorld('corpse-eat-world'),
+        isWater: () => false,
+        findNearestPlant: () => null,
+        findNearestAnimal: () => null,
+        queryAnimals: () => [],
+      },
+      extras || {}
+    );
+  }
+
+  // Herbivore killed by predator → corpse offers 100% of full calorie level
+  {
+    const rabbit = Wildborn.animal.createAnimal('rabbit', 100, 100);
+    const wolf = Wildborn.animal.createAnimal('wolf', 100, 100);
+    rabbit.calories = 12; // current calories ignored — yield is full capacity
+    Wildborn.animal.killAnimal(rabbit, wolf);
+    assert(rabbit.state === 'DEAD' && !rabbit.alive, 'killed herbivore becomes a corpse');
+    assert(
+      rabbit.corpseCalories === rabbit.maxCalories,
+      'corpse offers 100% of maxCalories (' + rabbit.corpseCalories + '/' + rabbit.maxCalories + ')'
+    );
+    assert(wolf.state === 'EATING' && wolf.target === rabbit, 'killer starts eating the corpse');
+    assert(
+      Wildborn.animal.HERBIVORE_SPECIES.rabbit.corpseYield === 1,
+      'rabbit corpseYield is 1'
+    );
+    assert(
+      Wildborn.animal.HERBIVORE_SPECIES.bison.corpseYield === 1,
+      'bison corpseYield is 1'
+    );
+    assert(
+      Wildborn.animal.HERBIVORE_SPECIES.turtle.corpseYield === 1,
+      'turtle corpseYield is 1'
+    );
+  }
+
+  // Predator keeps eating corpse past 60% / 95% until 100% full
+  {
+    const corpse = Wildborn.animal.createAnimal('deer', 100, 100);
+    const wolf = Wildborn.animal.createAnimal('wolf', 100, 100);
+    Wildborn.animal.killAnimal(corpse, null);
+    assert(corpse.corpseCalories === corpse.maxCalories, 'deer corpse is full calorie yield');
+    wolf.state = 'EATING';
+    wolf.target = corpse;
+    wolf._hungerSearch = true;
+    wolf._hunting = false;
+    wolf.calories = wolf.maxCalories * 0.55;
+    const before = wolf.calories;
+    Wildborn.animal.updateAnimal(wolf, 1.0, corpseEatCtx());
+    assert(wolf.state === 'EATING', 'keeps EATING corpse past 55% (no 60% bailout)');
+    assert(wolf.target === corpse, 'stays locked on corpse past hunger-return band');
+    assert(wolf.calories > before, 'continues transferring corpse calories while locked in');
+  }
+
+  // Stops at 100% full even if corpse remains
+  {
+    const corpse = Wildborn.animal.createAnimal('deer', 100, 100);
+    const wolf = Wildborn.animal.createAnimal('wolf', 100, 100);
+    Wildborn.animal.killAnimal(corpse, null);
+    wolf.state = 'EATING';
+    wolf.target = corpse;
+    wolf.calories = wolf.maxCalories - 0.5;
+    Wildborn.animal.updateAnimal(wolf, 1.0, corpseEatCtx());
+    assert(wolf.calories >= wolf.maxCalories, 'fills to 100% calories from corpse');
+    assert(wolf.state !== 'EATING', 'leaves EATING once fully full');
+    assert(wolf.target == null, 'abandons corpse once full');
+    assert(corpse.corpseCalories > 0, 'leftover corpse calories remain when eater is full');
+  }
+
+  // Stops when corpse food runs out before full
+  {
+    const corpse = Wildborn.animal.createAnimal('rabbit', 100, 100);
+    const wolf = Wildborn.animal.createAnimal('wolf', 100, 100);
+    Wildborn.animal.killAnimal(corpse, null);
+    corpse.corpseCalories = 1;
+    wolf.state = 'EATING';
+    wolf.target = corpse;
+    wolf._hunting = true;
+    wolf.calories = 10;
+    Wildborn.animal.updateAnimal(wolf, 1.0, corpseEatCtx());
+    assert(corpse.corpseCalories <= 0, 'corpse calories depleted');
+    assert(wolf.state !== 'EATING', 'leaves EATING when corpse food runs out');
+    assert(wolf.calories < wolf.maxCalories, 'wolf not yet full when food ran out');
+  }
+
+  // Omnivore (bear) also eats corpse to 100%
+  {
+    const corpse = Wildborn.animal.createAnimal('cow', 100, 100);
+    const bear = Wildborn.animal.createAnimal('bear', 100, 100);
+    Wildborn.animal.killAnimal(corpse, null);
+    bear.state = 'EATING';
+    bear.target = corpse;
+    bear.calories = bear.maxCalories - 0.5;
+    Wildborn.animal.updateAnimal(bear, 1.0, corpseEatCtx());
+    assert(bear.calories >= bear.maxCalories, 'omnivore fills to 100% from corpse');
+    assert(bear.state !== 'EATING', 'omnivore leaves EATING once fully full');
+  }
+}
+
 // --- Unit: stamina drain / regen ---
 {
   const rabbit = Wildborn.animal.createAnimal('rabbit', 0, 0);
