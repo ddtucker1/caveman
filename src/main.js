@@ -1,8 +1,10 @@
 /**
  * Wildborn — main entry.
  * Phase 1: menu → seeded world → player movement → camera → render loop.
+ * Ecosystem: plants / herbivores / predators (toggle via Wildborn.config).
  */
 (function () {
+  const config = Wildborn.config;
   const { createRng, randomSeedString } = Wildborn.rng;
   const { createWorld, TILE_SIZE, CHUNK_SIZE } = Wildborn.world;
   const { createPlayer, updatePlayer, findSpawn } = Wildborn.player;
@@ -16,10 +18,13 @@
     clear,
     drawWorld,
     drawPlayer,
+    drawEcosystem,
+    drawEcosystemDebug,
     updateHud,
     setSeedDisplay,
     drawDebug,
   } = Wildborn.render;
+  const { createEcosystem } = Wildborn.ecosystem;
 
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
@@ -33,11 +38,13 @@
     world: null,
     player: null,
     camera: null,
+    ecosystem: null,
     keys: { up: false, down: false, left: false, right: false },
     lastTime: 0,
     fps: 0,
     fpsAccum: 0,
     fpsFrames: 0,
+    showEcosystemDebug: !!config.ecosystemDebugOverlay,
   };
 
   // ---------------------------------------------------------------------------
@@ -76,6 +83,14 @@
     const dir = KEY_MAP[e.code];
     if (dir) {
       game.keys[dir] = true;
+      e.preventDefault();
+      return;
+    }
+
+    // F3 — toggle ecosystem debug overlay
+    if (e.code === 'F3') {
+      game.showEcosystemDebug = !game.showEcosystemDebug;
+      config.ecosystemDebugOverlay = game.showEcosystemDebug;
       e.preventDefault();
     }
   });
@@ -134,6 +149,17 @@
     const spawn = findSpawn(game.world);
     game.player = createPlayer(spawn);
 
+    // Living ecosystem (optional — config.ecosystemEnabled)
+    game.ecosystem = null;
+    if (config.ecosystemEnabled) {
+      game.ecosystem = createEcosystem({
+        world: game.world,
+        rng: game.rng,
+        config: config,
+        origin: { x: spawn.x, y: spawn.y },
+      });
+    }
+
     snapCamera(game.camera, game.player);
     setSeedDisplay(seedString);
     updateHud(game.player);
@@ -156,6 +182,10 @@
     const playerCy = Math.floor(game.player.y / TILE_SIZE / CHUNK_SIZE);
     game.world.unloadFarChunks(playerCx, playerCy, 3);
 
+    if (game.ecosystem && config.ecosystemEnabled) {
+      game.ecosystem.update(step);
+    }
+
     updateHud(game.player);
   }
 
@@ -164,6 +194,11 @@
     const h = window.innerHeight;
     clear(ctx, w, h);
     drawWorld(ctx, game.world, game.camera);
+
+    if (game.ecosystem && config.ecosystemEnabled) {
+      drawEcosystem(ctx, game.ecosystem, game.camera);
+    }
+
     drawPlayer(ctx, game.player, game.camera);
 
     const playerTx = Math.floor(game.player.x / TILE_SIZE);
@@ -174,6 +209,10 @@
       playerTx: playerTx,
       playerTy: playerTy,
     });
+
+    if (game.showEcosystemDebug && game.ecosystem) {
+      drawEcosystemDebug(ctx, game.ecosystem.getDebugStats());
+    }
   }
 
   function frame(now) {
@@ -197,6 +236,6 @@
 
   requestAnimationFrame(frame);
 
-  // Console access for Phase 1 verification
+  // Console access for verification / testing
   window.__wildborn = game;
 })();

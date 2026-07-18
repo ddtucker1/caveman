@@ -113,10 +113,185 @@
     ctx.fillText('Tile: ' + info.playerTx + ', ' + info.playerTy, 14, h - 8);
   }
 
+  // ---------------------------------------------------------------------------
+  // Ecosystem rendering
+  // ---------------------------------------------------------------------------
+
+  /** Draw plants, animals, eggs visible through the camera. */
+  function drawEcosystem(ctx, ecosystem, camera) {
+    if (!ecosystem) return;
+
+    const pad = 32;
+    const x0 = camera.x - pad;
+    const y0 = camera.y - pad;
+    const x1 = camera.x + camera.width + pad;
+    const y1 = camera.y + camera.height + pad;
+
+    const plants = ecosystem.plants;
+    for (let i = 0; i < plants.length; i++) {
+      const p = plants[i];
+      if (!p.alive) continue;
+      if (p.x < x0 || p.x > x1 || p.y < y0 || p.y > y1) continue;
+      drawPlantSprite(ctx, p, camera);
+    }
+
+    const eggs = ecosystem.eggs;
+    for (let i = 0; i < eggs.length; i++) {
+      const e = eggs[i];
+      if (e.x < x0 || e.x > x1 || e.y < y0 || e.y > y1) continue;
+      const s = worldToScreen(camera, e.x, e.y);
+      ctx.fillStyle = e.color || '#f5f0e0';
+      ctx.beginPath();
+      ctx.ellipse(s.x, s.y, e.size || 4, (e.size || 4) * 1.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    const animals = ecosystem.animals;
+    for (let i = 0; i < animals.length; i++) {
+      const a = animals[i];
+      if (a.x < x0 || a.x > x1 || a.y < y0 || a.y > y1) continue;
+      // Panther stealth: invisible until close to camera center (player)
+      if (a.special === 'stealth' && a.alive && a.state !== 'DEAD') {
+        const cx = camera.x + camera.width / 2;
+        const cy = camera.y + camera.height / 2;
+        const dx = a.x - cx;
+        const dy = a.y - cy;
+        const reveal = a.stealthRevealDist || 120;
+        if (dx * dx + dy * dy > reveal * reveal) continue;
+      }
+      drawAnimalSprite(ctx, a, camera);
+    }
+  }
+
+  function drawPlantSprite(ctx, plant, camera) {
+    const s = worldToScreen(camera, plant.x, plant.y);
+    const sz = plant.size;
+    const calRatio = plant.calories / plant.maxCalories;
+
+    ctx.globalAlpha = 0.55 + 0.45 * calRatio;
+    ctx.fillStyle = plant.color;
+    ctx.fillRect(s.x - sz / 2, s.y - sz / 2, sz, sz);
+
+    // Species accent (berries / fruit / mushroom cap)
+    if (plant.species === 'berry_bush' || plant.species === 'fruit_tree') {
+      ctx.fillStyle = plant.accent;
+      ctx.fillRect(s.x - 2, s.y - sz / 2 - 2, 3, 3);
+      ctx.fillRect(s.x + 1, s.y - 2, 3, 3);
+    } else if (plant.species === 'mushroom') {
+      ctx.fillStyle = plant.accent;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y - 2, sz * 0.4, Math.PI, 0);
+      ctx.fill();
+    } else if (plant.species === 'cactus') {
+      ctx.fillStyle = plant.accent;
+      ctx.fillRect(s.x - 1, s.y - sz / 2 - 3, 2, 4);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawAnimalSprite(ctx, animal, camera) {
+    const s = worldToScreen(camera, animal.x, animal.y);
+    const sz = animal.size;
+
+    if (animal.state === 'DEAD') {
+      ctx.globalAlpha = 0.55;
+      ctx.fillStyle = '#5a4038';
+      ctx.fillRect(s.x - sz / 2, s.y - sz / 3, sz, sz * 0.55);
+      ctx.globalAlpha = 1;
+      return;
+    }
+
+    if (animal.burrowed) {
+      ctx.fillStyle = 'rgba(80,60,40,0.5)';
+      ctx.beginPath();
+      ctx.ellipse(s.x, s.y, sz * 0.6, sz * 0.3, 0, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    }
+
+    ctx.fillStyle = animal.color;
+    ctx.fillRect(s.x - sz / 2, s.y - sz / 2, sz, sz);
+
+    if (animal.accent) {
+      ctx.fillStyle = animal.accent;
+      ctx.fillRect(s.x - sz / 2, s.y - sz / 2, sz, 3);
+    }
+
+    // Juvenile indicator
+    if (!animal.isAdult) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(s.x - sz / 2 - 1, s.y - sz / 2 - 1, sz + 2, sz + 2);
+    }
+
+    // Tiny hunger pip
+    const ratio = animal.calories / animal.maxCalories;
+    if (ratio < 0.35) {
+      ctx.fillStyle = ratio < 0.15 ? '#c44' : '#c90';
+      ctx.fillRect(s.x - sz / 2, s.y + sz / 2 + 1, sz * ratio, 2);
+    }
+  }
+
+  /**
+   * F3 ecosystem debug panel — counts & average calories by species.
+   * @param {CanvasRenderingContext2D} ctx
+   * @param {object|null} stats from ecosystem.getDebugStats()
+   */
+  function drawEcosystemDebug(ctx, stats) {
+    if (!stats) return;
+
+    const lines = [];
+    lines.push('ECOSYSTEM  tick ' + stats.tick);
+    lines.push(
+      'Plants: ' + stats.plantsAlive + '  avgCal ' + stats.plantAvgCalories +
+      '  eggs ' + stats.eggs + '  corpses ' + stats.corpses
+    );
+    lines.push('Herbivores (' + stats.herbTotal + '):');
+    for (const id in stats.herbivores) {
+      const n = stats.herbivores[id];
+      if (!n) continue;
+      lines.push('  ' + id + ': ' + n + '  avgCal ' + (stats.avgCalories[id] || 0));
+    }
+    lines.push('Predators (' + stats.predTotal + '):');
+    for (const id in stats.predators) {
+      const n = stats.predators[id];
+      if (!n) continue;
+      lines.push('  ' + id + ': ' + n + '  avgCal ' + (stats.avgCalories[id] || 0));
+    }
+
+    const lineH = 14;
+    const pad = 10;
+    const boxW = 260;
+    const boxH = pad * 2 + lines.length * lineH;
+    const x = 8;
+    const y = 80;
+
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.72)';
+    ctx.fillRect(x, y, boxW, boxH);
+    ctx.strokeStyle = 'rgba(200, 200, 160, 0.35)';
+    ctx.strokeRect(x, y, boxW, boxH);
+
+    ctx.font = '12px monospace';
+    ctx.fillStyle = '#e8e4d4';
+    for (let i = 0; i < lines.length; i++) {
+      const text = lines[i];
+      if (text.indexOf('Herbivores') === 0 || text.indexOf('Predators') === 0) {
+        ctx.fillStyle = '#d4c48a';
+      } else if (text.indexOf('ECOSYSTEM') === 0) {
+        ctx.fillStyle = '#8fd050';
+      } else {
+        ctx.fillStyle = '#e8e4d4';
+      }
+      ctx.fillText(text, x + pad, y + pad + (i + 1) * lineH - 4);
+    }
+  }
+
   Wildborn.render = {
     clear,
     drawWorld,
     drawPlayer,
+    drawEcosystem,
+    drawEcosystemDebug,
     updateHud,
     setSeedDisplay,
     drawDebug,
