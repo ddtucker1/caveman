@@ -15,6 +15,7 @@ Entities use **data-driven geometric silhouettes** (`src/shapes.json` /
 ### Controls
 
 - **WASD / Arrows** — move
+- **Tab** — toggle Ecosystem Census (also via top-right Census button)
 - **L** — toggle species legend (icons, names, live population counts)
 - **F3** — toggle ecosystem debug overlay (population & calorie stats)
 - **Hover** — entity tooltip (species, calories, age, state)
@@ -23,10 +24,12 @@ Entities use **data-driven geometric silhouettes** (`src/shapes.json` /
 
 In `src/config.js`:
 
+- `mapTiles` — fixed playable map size (default `400` → 12800×12800 px)
 - `ecosystemEnabled` — master toggle (default `true`)
 - `ecosystemTickSeconds` — discrete hunger/growth tick rate
 - `ecosystemDebugOverlay` — start with F3 panel open
 - `showLegend` — start with L legend open
+- `showCensus` — start with Ecosystem Census open
 
 ### Visual tweaks
 

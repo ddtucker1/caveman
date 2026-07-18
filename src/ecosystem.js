@@ -36,7 +36,7 @@
     alligator: 3,
   };
 
-  /** Exactly 150 plants scattered across the 200×200 map. */
+  /** Exactly 150 plants scattered across the 400×400 map. */
   const INITIAL_PLANT_COUNT = 150;
 
   /**
@@ -50,7 +50,7 @@
     const world = opts.world;
     const rng = opts.rng.derive('ecosystem');
     const config = opts.config || Wildborn.config;
-    const mapTiles = world.MAP_TILES || config.mapTiles || 200;
+    const mapTiles = world.MAP_TILES || config.mapTiles || 400;
     const mapPixelSize = world.MAP_PIXEL_SIZE || mapTiles * (world.TILE_SIZE || 32);
     const TILE_SIZE = world.TILE_SIZE || 32;
     const origin = opts.origin || {
@@ -81,7 +81,7 @@
     }
 
     // -------------------------------------------------------------------------
-    // Spawning helpers — pure random tiles on the 200×200 map
+    // Spawning helpers — pure random tiles on the 400×400 map
     // -------------------------------------------------------------------------
 
     /** Pick a random land tile (0–199, 0–199). Retry until land is found. */
@@ -169,7 +169,7 @@
       return findWalkableSpot();
     }
 
-    /** Respawn: completely random land tile anywhere on the 200×200 map. */
+    /** Respawn: completely random land tile anywhere on the 400×400 map. */
     function findRespawnSpot() {
       return findRandomLandTile(800);
     }
@@ -479,7 +479,7 @@
       };
     }
 
-    // Boot — load the entire 200×200 map before placing entities
+    // Boot — load the entire 400×400 map before placing entities
     if (world.ensureMapLoaded) {
       world.ensureMapLoaded();
     } else {

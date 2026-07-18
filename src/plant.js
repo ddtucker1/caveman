@@ -199,7 +199,7 @@
   function relocateToLand(plant, world, maxRadius) {
     maxRadius = maxRadius == null ? 24 : maxRadius;
     const TILE_SIZE = world.TILE_SIZE || Wildborn.world.TILE_SIZE;
-    const mapTiles = world.MAP_TILES || Wildborn.world.MAP_TILES || 200;
+    const mapTiles = world.MAP_TILES || Wildborn.world.MAP_TILES || 400;
     const tx0 = Math.floor(plant.x / TILE_SIZE);
     const ty0 = Math.floor(plant.y / TILE_SIZE);
     for (let r = 0; r <= maxRadius; r++) {

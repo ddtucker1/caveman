@@ -49,11 +49,162 @@
     fpsFrames: 0,
     showEcosystemDebug: !!config.ecosystemDebugOverlay,
     showLegend: !!config.showLegend,
+    showCensus: !!config.showCensus,
+    censusRefreshAccum: 0,
     mouseX: 0,
     mouseY: 0,
     hoverEntity: null,
     time: 0,
   };
+
+  // ---------------------------------------------------------------------------
+  // Ecosystem Census popup (Tab / top-right button)
+  // ---------------------------------------------------------------------------
+
+  const CENSUS_ICONS = {
+    berry_bush: '🌿',
+    grass: '🌿',
+    mushroom: '🍄',
+    fruit_tree: '🌳',
+    cactus: '🌵',
+    rabbit: '🐇',
+    deer: '🦌',
+    cow: '🐄',
+    raccoon: '🦝',
+    bison: '🦬',
+    ostrich: '🦤',
+    turtle: '🐢',
+    lizard: '🦎',
+    wolf: '🐺',
+    lion: '🦁',
+    panther: '🐆',
+    bear: '🐻',
+    alligator: '🐊',
+  };
+
+  const btnCensus = document.getElementById('btn-census');
+  const censusWindow = document.getElementById('census-window');
+  const censusClose = document.getElementById('census-close');
+  const censusTitlebar = document.getElementById('census-titlebar');
+  const censusPlantRows = document.getElementById('census-plant-rows');
+  const censusAnimalRows = document.getElementById('census-animal-rows');
+
+  function censusRowHtml(id, label, count) {
+    const icon = CENSUS_ICONS[id] || '•';
+    return (
+      '<div class="census-row">' +
+      '<span class="census-icon">' + icon + '</span>' +
+      '<span class="census-name">' + label + '</span>' +
+      '<span class="census-count">' + count + '</span>' +
+      '</div>'
+    );
+  }
+
+  function refreshCensus() {
+    if (!game.ecosystem || !censusPlantRows || !censusAnimalRows) return;
+
+    const plants = Wildborn.shapes.listSpeciesByCategory('plant');
+    const herbs = Wildborn.shapes.listSpeciesByCategory('herbivore');
+    const preds = Wildborn.shapes.listSpeciesByCategory('predator');
+    const stats = game.ecosystem.getDebugStats();
+
+    const plantCounts = {};
+    for (let i = 0; i < plants.length; i++) plantCounts[plants[i].id] = 0;
+    for (let i = 0; i < game.ecosystem.plants.length; i++) {
+      const p = game.ecosystem.plants[i];
+      if (p.alive) plantCounts[p.species] = (plantCounts[p.species] || 0) + 1;
+    }
+
+    let plantHtml = '';
+    for (let i = 0; i < plants.length; i++) {
+      const id = plants[i].id;
+      plantHtml += censusRowHtml(id, plants[i].def.label, plantCounts[id] || 0);
+    }
+    censusPlantRows.innerHTML = plantHtml;
+
+    let animalHtml = '';
+    for (let i = 0; i < herbs.length; i++) {
+      const id = herbs[i].id;
+      const n = (stats.herbivores && stats.herbivores[id]) || 0;
+      animalHtml += censusRowHtml(id, herbs[i].def.label, n);
+    }
+    animalHtml += '<hr class="census-sep" />';
+    for (let i = 0; i < preds.length; i++) {
+      const id = preds[i].id;
+      const n = (stats.predators && stats.predators[id]) || 0;
+      animalHtml += censusRowHtml(id, preds[i].def.label, n);
+    }
+    censusAnimalRows.innerHTML = animalHtml;
+  }
+
+  function resetCensusPosition() {
+    if (!censusWindow) return;
+    censusWindow.style.left = '';
+    censusWindow.style.top = '80px';
+    censusWindow.style.right = '12px';
+  }
+
+  function setCensusVisible(visible) {
+    game.showCensus = !!visible;
+    config.showCensus = game.showCensus;
+    if (!censusWindow) return;
+    if (game.showCensus) {
+      censusWindow.classList.remove('hidden');
+      refreshCensus();
+      game.censusRefreshAccum = 0;
+    } else {
+      censusWindow.classList.add('hidden');
+    }
+  }
+
+  function toggleCensus() {
+    setCensusVisible(!game.showCensus);
+  }
+
+  if (btnCensus) {
+    btnCensus.addEventListener('click', function (e) {
+      e.preventDefault();
+      toggleCensus();
+    });
+  }
+  if (censusClose) {
+    censusClose.addEventListener('click', function (e) {
+      e.preventDefault();
+      setCensusVisible(false);
+    });
+  }
+
+  // Drag census window by title bar
+  (function setupCensusDrag() {
+    if (!censusWindow || !censusTitlebar) return;
+    let dragging = false;
+    let offsetX = 0;
+    let offsetY = 0;
+
+    censusTitlebar.addEventListener('mousedown', function (e) {
+      if (e.target === censusClose) return;
+      dragging = true;
+      const rect = censusWindow.getBoundingClientRect();
+      offsetX = e.clientX - rect.left;
+      offsetY = e.clientY - rect.top;
+      censusWindow.style.right = 'auto';
+      e.preventDefault();
+    });
+
+    window.addEventListener('mousemove', function (e) {
+      if (!dragging) return;
+      const maxX = window.innerWidth - censusWindow.offsetWidth;
+      const maxY = window.innerHeight - censusWindow.offsetHeight;
+      const x = Math.max(0, Math.min(maxX, e.clientX - offsetX));
+      const y = Math.max(0, Math.min(maxY, e.clientY - offsetY));
+      censusWindow.style.left = x + 'px';
+      censusWindow.style.top = y + 'px';
+    });
+
+    window.addEventListener('mouseup', function () {
+      dragging = false;
+    });
+  })();
 
   // ---------------------------------------------------------------------------
   // Canvas sizing (CSS pixels via setTransform)
@@ -107,6 +258,13 @@
     if (e.code === 'KeyL' && state === 'playing') {
       game.showLegend = !game.showLegend;
       config.showLegend = game.showLegend;
+      e.preventDefault();
+      return;
+    }
+
+    // Tab — toggle Ecosystem Census
+    if (e.code === 'Tab' && state === 'playing') {
+      toggleCensus();
       e.preventDefault();
     }
   });
@@ -162,7 +320,7 @@
       height: window.innerHeight,
     });
 
-    // Lock the playable world to the fixed 200×200 map (6400×6400 px)
+    // Lock the playable world to the fixed 400×400 map (12800×12800 px)
     if (game.world.ensureMapLoaded) {
       game.world.ensureMapLoaded();
     } else {
@@ -186,6 +344,10 @@
     setSeedDisplay(seedString);
     updateHud(game.player);
 
+    if (btnCensus) btnCensus.classList.remove('hidden');
+    resetCensusPosition();
+    setCensusVisible(!!config.showCensus);
+
     menuEl.classList.add('hidden');
     state = 'playing';
     game.lastTime = performance.now();
@@ -199,7 +361,7 @@
     updatePlayer(game.player, game.keys, step, game.world);
     updateCamera(game.camera, game.player, MAP_PIXEL_SIZE);
 
-    // Keep the whole fixed map loaded (16 chunks at 200×200 / 64)
+    // Keep the whole fixed map loaded (49 chunks at 400×400 / 64)
     if (game.world.ensureMapLoaded) {
       game.world.ensureMapLoaded();
     } else {
@@ -217,6 +379,14 @@
       );
     } else {
       game.hoverEntity = null;
+    }
+
+    if (game.showCensus && game.ecosystem) {
+      game.censusRefreshAccum += step;
+      if (game.censusRefreshAccum >= 2) {
+        game.censusRefreshAccum = 0;
+        refreshCensus();
+      }
     }
 
     updateHud(game.player);
