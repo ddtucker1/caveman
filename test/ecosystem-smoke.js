@@ -148,7 +148,7 @@ function assert(cond, msg) {
   assert(Wildborn.animal.EAT_RANGE === 20, 'eat range is 20px');
   assert(Wildborn.animal.PLANT_SIGHT_RANGE === 256, 'plant sight is 8 tiles (256px)');
   assert(Wildborn.animal.FOOD_DETECT_RANGE === 256, 'food detect matches plant sight');
-  assert(Wildborn.animal.WATER_SPEED_MULT === 0.25, 'water speed is 25% of normal');
+  assert(Wildborn.animal.WATER_SPEED_MULT === 0.5, 'water speed is 50% of normal');
   assert(Wildborn.animal.AQUATIC_WATER_SPEED_MULT === 2, 'aquatic water speed is 2× land');
 }
 
@@ -166,9 +166,11 @@ function assert(cond, msg) {
   assert(rabbit.stamina === 100 && rabbit.maxStamina === 100, 'animals spawn with full stamina');
   const wolf = Wildborn.animal.createAnimal('wolf', 0, 0);
   assert(wolf.diet === 'predator' && wolf.attackPower === 22, 'wolf predator stats');
+  assert(wolf.defense === 'none', 'predators default to no flee defense');
   assert(wolf.special == null, 'animals have no special abilities');
   const bear = Wildborn.animal.createAnimal('bear', 0, 0);
   assert(bear.diet === 'omnivore', 'bear is omnivore');
+  assert(bear.defense === 'none', 'omnivore predators also never flee by default');
   assert(Wildborn.animal.OMNIVORE_HUNT_RATIO === 0.5, 'omnivores hunt at 50% calories');
   assert(wolf.state === 'ROAM', 'predators spawn in ROAM state');
   assert(wolf.spawnX === 0 && wolf.spawnY === 0, 'predator records spawn territory point');
@@ -373,6 +375,39 @@ function assert(cond, msg) {
     assert(rabbit.state === 'EATING', 'non-targeting nearby predator does not interrupt');
     assert(rabbit.target === plant, 'stays on plant when predator is not targeting');
   }
+}
+
+// --- Unit: predators never flee — keep attacking prey ---
+{
+  const wolf = Wildborn.animal.createAnimal('wolf', 100, 100);
+  const bison = Wildborn.animal.createAnimal('bison', 110, 100);
+  wolf.state = 'SEEK_PREY';
+  wolf.target = bison;
+  wolf._hunting = true;
+  wolf.calories = wolf.maxCalories * 0.2;
+
+  // Counter-damage from fighting prey must not scare the predator away
+  Wildborn.animal.applyDamage(wolf, 10, bison);
+  assert(wolf.state === 'SEEK_PREY', 'predator stays in SEEK_PREY after taking damage');
+  assert(wolf.target === bison, 'predator keeps prey as target after taking damage');
+  assert(wolf.fleeFrom == null, 'predator does not set fleeFrom when hit');
+  assert(wolf._hunting === true, 'predator remains in hunt mode after taking damage');
+
+  // Even if somehow put into FLEE, updateFlee immediately resumes the attack
+  wolf.state = 'FLEE';
+  wolf.fleeFrom = bison;
+  wolf.stateTimer = 2.5;
+  Wildborn.animal.updateAnimal(wolf, 0.1, {
+    rng: createRng(1),
+    isWater: () => false,
+    findNearestAnimal: () => null,
+    findNearestPlant: () => null,
+    queryAnimals: () => [bison],
+    tickSeconds: 0.5,
+  });
+  assert(wolf.state === 'SEEK_PREY', 'predator leaves FLEE and resumes SEEK_PREY');
+  assert(wolf.target === bison, 'predator retargets prey after aborted flee');
+  assert(wolf.fleeFrom == null, 'predator clears fleeFrom on resume');
 }
 
 // --- Unit: corpse yield 100% + predators eat to full ---
