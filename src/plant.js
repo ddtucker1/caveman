@@ -1,6 +1,7 @@
 /**
  * Ecosystem plants — grow calories over time, eaten by herbivores (and bears).
- * When depleted they die and respawn elsewhere after a delay.
+ * When depleted they become invisible, sprout for 60s, then teleport to a
+ * random land tile at 50% max calories (entity stays in memory).
  */
 (function (global) {
   const Wildborn = (global.Wildborn = global.Wildborn || {});
@@ -62,7 +63,11 @@
 
   const SPECIES_LIST = Object.keys(PLANT_SPECIES);
   const START_CALORIES = 10;
-  const RESPAWN_DELAY_TICKS = 40;
+  /** 60 seconds at 0.5s/tick → 120 ticks. */
+  const RESPAWN_DELAY_SECONDS = 60;
+  const RESPAWN_DELAY_TICKS = 120;
+  /** Fraction of max calories restored on respawn. */
+  const RESPAWN_CALORIE_RATIO = 0.5;
 
   let nextPlantId = 1;
 
@@ -81,11 +86,16 @@
       species: speciesId,
       x: x,
       y: y,
+      /** Tile coords for grid systems (kept in sync with x/y). */
+      tx: 0,
+      ty: 0,
       calories: START_CALORIES,
       maxCalories: def.maxCalories,
       growthPerTick: def.growthPerTick,
       alive: true,
       respawnTimer: 0,
+      /** 0→1 sprout growth while waiting to respawn. */
+      sproutProgress: 0,
       color: def.color,
       accent: def.accent,
       size: def.size,
@@ -112,7 +122,7 @@
 
   /**
    * Consume up to `amount` calories. Returns calories actually eaten.
-   * Marks plant dead (starts respawn) when calories hit 0.
+   * Marks plant dead (starts respawn) when calories hit 0 — stays in memory.
    */
   function consumePlant(plant, amount) {
     if (!plant.alive || plant.calories <= 0) return 0;
@@ -122,12 +132,13 @@
       plant.calories = 0;
       plant.alive = false;
       plant.respawnTimer = RESPAWN_DELAY_TICKS;
+      plant.sproutProgress = 0;
     }
     return taken;
   }
 
   /**
-   * One ecosystem tick: grow if alive, or respawn on land.
+   * One ecosystem tick: grow if alive, or advance 60s respawn cooldown.
    * @param {object} plant
    * @param {function(number,number):{x:number,y:number}|null} findRespawnSpot
    */
@@ -139,10 +150,15 @@
           plant.calories + plant.growthPerTick
         );
       }
+      plant.sproutProgress = 0;
       return;
     }
 
     plant.respawnTimer -= 1;
+    plant.sproutProgress = Math.max(
+      0,
+      Math.min(1, 1 - plant.respawnTimer / RESPAWN_DELAY_TICKS)
+    );
     if (plant.respawnTimer > 0) return;
 
     const spot = findRespawnSpot ? findRespawnSpot(plant.x, plant.y) : null;
@@ -150,9 +166,11 @@
       plant.x = spot.x;
       plant.y = spot.y;
     }
-    plant.calories = START_CALORIES;
+    // Respawn at 50% max calories, then resume normal growth from there
+    plant.calories = plant.maxCalories * RESPAWN_CALORIE_RATIO;
     plant.alive = true;
     plant.respawnTimer = 0;
+    plant.sproutProgress = 0;
   }
 
   /**
@@ -165,16 +183,22 @@
   function relocateToLand(plant, world, maxRadius) {
     maxRadius = maxRadius == null ? 24 : maxRadius;
     const TILE_SIZE = world.TILE_SIZE || Wildborn.world.TILE_SIZE;
+    const mapTiles = world.MAP_TILES || Wildborn.world.MAP_TILES || 100;
     const tx0 = Math.floor(plant.x / TILE_SIZE);
     const ty0 = Math.floor(plant.y / TILE_SIZE);
     for (let r = 0; r <= maxRadius; r++) {
       for (let dy = -r; dy <= r; dy++) {
         for (let dx = -r; dx <= r; dx++) {
           if (Math.abs(dx) !== r && Math.abs(dy) !== r && r > 0) continue;
-          const tile = world.getTile(tx0 + dx, ty0 + dy);
-          if (!world.isSolid(tile) && !world.isSlow(tile)) {
-            plant.x = (tx0 + dx) * TILE_SIZE + TILE_SIZE / 2;
-            plant.y = (ty0 + dy) * TILE_SIZE + TILE_SIZE / 2;
+          const tx = tx0 + dx;
+          const ty = ty0 + dy;
+          if (tx < 0 || ty < 0 || tx >= mapTiles || ty >= mapTiles) continue;
+          const tile = world.getTile(tx, ty);
+          if (world.isLand ? world.isLand(tile) : !world.isSolid(tile) && !world.isSlow(tile)) {
+            plant.x = tx * TILE_SIZE + TILE_SIZE / 2;
+            plant.y = ty * TILE_SIZE + TILE_SIZE / 2;
+            plant.tx = tx;
+            plant.ty = ty;
             return true;
           }
         }
@@ -188,6 +212,8 @@
     SPECIES_LIST,
     START_CALORIES,
     RESPAWN_DELAY_TICKS,
+    RESPAWN_DELAY_SECONDS,
+    RESPAWN_CALORIE_RATIO,
     createPlant,
     pickSpecies,
     consumePlant,

@@ -12,16 +12,25 @@
     /** Seconds of real time per discrete ecosystem tick (hunger, growth, age). */
     ecosystemTickSeconds: 0.5,
 
-    /** World-pixel half-extent used when scattering the initial population. */
-    ecosystemSpawnRadius: 48 * 32, // ~48 tiles
+    /** Fixed playable map size in tiles (100×100 → 3200×3200 px at 32px tiles). */
+    mapTiles: 100,
 
-    /** Spatial hash cell size in world pixels. */
-    spatialCellSize: 96,
+    /**
+     * Legacy half-extent used as a soft animal roam pad.
+     * Entities are hard-clamped to the fixed map; this is map half-diagonal.
+     */
+    ecosystemSpawnRadius: 50 * 32,
+
+    /** Spatial hash cell size in world pixels (tuned for ~150 plants / ~100 animals). */
+    spatialCellSize: 64,
 
     /** Show ecosystem debug overlay (also toggleable with F3 in-game). */
     ecosystemDebugOverlay: false,
 
     /** Show species legend panel (also toggleable with L in-game). */
     showLegend: false,
+
+    /** Show minimap of the full 100×100 grid (bottom-right). */
+    showMinimap: true,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

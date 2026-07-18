@@ -20,18 +20,35 @@
     camera.height = height;
   }
 
+  /** Clamp camera so the view cannot scroll past map edges. */
+  function clampCameraToMap(camera, mapPixelSize) {
+    mapPixelSize = mapPixelSize == null ? Wildborn.world.MAP_PIXEL_SIZE : mapPixelSize;
+    if (camera.width >= mapPixelSize) {
+      camera.x = (mapPixelSize - camera.width) / 2;
+    } else {
+      camera.x = Math.max(0, Math.min(mapPixelSize - camera.width, camera.x));
+    }
+    if (camera.height >= mapPixelSize) {
+      camera.y = (mapPixelSize - camera.height) / 2;
+    } else {
+      camera.y = Math.max(0, Math.min(mapPixelSize - camera.height, camera.y));
+    }
+  }
+
   /** Smoothly center camera on the player. */
-  function updateCamera(camera, target) {
+  function updateCamera(camera, target, mapPixelSize) {
     const targetX = target.x + target.w / 2 - camera.width / 2;
     const targetY = target.y + target.h / 2 - camera.height / 2;
     camera.x += (targetX - camera.x) * camera.follow;
     camera.y += (targetY - camera.y) * camera.follow;
+    if (mapPixelSize != null) clampCameraToMap(camera, mapPixelSize);
   }
 
   /** Snap camera instantly onto target (used on new game). */
-  function snapCamera(camera, target) {
+  function snapCamera(camera, target, mapPixelSize) {
     camera.x = target.x + target.w / 2 - camera.width / 2;
     camera.y = target.y + target.h / 2 - camera.height / 2;
+    if (mapPixelSize != null) clampCameraToMap(camera, mapPixelSize);
   }
 
   /** Visible world-pixel bounds with padding for chunk preload. */
@@ -54,6 +71,7 @@
     resizeCamera,
     updateCamera,
     snapCamera,
+    clampCameraToMap,
     getVisibleBounds,
     worldToScreen,
   };
