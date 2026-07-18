@@ -110,7 +110,6 @@ function assert(cond, msg) {
 // --- Unit: predator hunt threshold / satiation ---
 {
   const wolf = Wildborn.animal.createAnimal('wolf', 100, 100);
-  const eggs = [];
   const ctx = {
     rng: createRng('hunt-test'),
     tickSeconds: 0.5,
