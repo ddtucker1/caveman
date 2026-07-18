@@ -27,8 +27,8 @@
     very_fast: 72.5,
   };
   const MIN_SPEED = 0.5;
-  /** Animals on water move at 25% of normal speed (stacks with other modifiers). */
-  const WATER_SPEED_MULT = 0.25;
+  /** Animals on water move at 50% of normal speed (stacks with other modifiers). */
+  const WATER_SPEED_MULT = 0.5;
   /** Turtles / alligators (aquatic) move at 2× land speed while in water. */
   const AQUATIC_WATER_SPEED_MULT = 2;
   const TILE_SIZE = 32;
@@ -431,7 +431,8 @@
       aquatic: !!(def.aquatic || def.waterSpeed),
       waterSpeedKey: def.waterSpeed || null,
       attackPower: def.attackPower || 5,
-      defense: def.defense || 'flee',
+      // Predators never flee; herbivores default to fleeing when hit.
+      defense: def.defense || (isPred ? 'none' : 'flee'),
       attackStyle: def.attackStyle || null,
       corpseYield: def.corpseYield != null ? def.corpseYield : 1,
 
@@ -614,7 +615,7 @@
       if (animal.aquatic) {
         speed = Math.max(MIN_SPEED, animal.baseSpeed * AQUATIC_WATER_SPEED_MULT * speedMult);
       } else {
-        // Land animals: 25% of current speed
+        // Land animals: 50% of current speed
         speed *= WATER_SPEED_MULT;
       }
     }
@@ -944,7 +945,21 @@
       killAnimal(target, attacker);
       return dmg;
     }
-    // Defensive reactions
+    // Predators never get scared of prey — keep attacking until the target is dead.
+    if (isPredator(target) && target.diet !== 'herbivore') {
+      target.fleeFrom = null;
+      target._fleeExhausted = false;
+      target._counterAttack = false;
+      if (attacker && attacker.alive && attacker.state !== AI_STATE.DEAD) {
+        target.target = attacker;
+        if (target.state !== AI_STATE.EATING) {
+          target.state = AI_STATE.SEEK_PREY;
+          target._hunting = true;
+        }
+      }
+      return dmg;
+    }
+    // Defensive reactions (herbivores / prey)
     if (target.defense === 'flee') {
       target.state = AI_STATE.FLEE;
       target.fleeFrom = attacker;
@@ -1712,6 +1727,22 @@
   function updateFlee(animal, dt, ctx) {
     animal.stateTimer -= dt;
 
+    // Predators never flee — resume attacking the threat until it is dead.
+    if (isPredator(animal) && animal.diet !== 'herbivore') {
+      const threat = animal.fleeFrom || animal.target;
+      animal.fleeFrom = null;
+      animal._fleeExhausted = false;
+      animal._counterAttack = false;
+      if (threat && threat.alive && threat.state !== AI_STATE.DEAD) {
+        animal.target = threat;
+        animal.state = AI_STATE.SEEK_PREY;
+        animal._hunting = true;
+      } else {
+        animal.state = defaultRestState(animal);
+      }
+      return;
+    }
+
     // Counter-attack styles engage instead of pure flee
     if (animal._counterAttack && animal.target && animal.target.alive) {
       const t = animal.target;
@@ -1760,7 +1791,7 @@
       return;
     }
 
-    // Non-herbivore flee (timer-based)
+    // Non-herbivore flee (timer-based) — omnivore/other edge cases only
     if (animal.stateTimer <= 0) {
       animal.fleeFrom = null;
       animal.state = defaultRestState(animal);
