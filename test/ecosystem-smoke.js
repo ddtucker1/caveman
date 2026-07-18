@@ -65,27 +65,36 @@ function assert(cond, msg) {
   assert(p.alive && p.x === 50 && p.calories === 10, 'plant respawns after delay');
 }
 
-// --- Unit: plant grass growth / off-grass wither ---
+// --- Unit: plant growth / calorie density ---
 {
   const p = createPlant('grass', 0, 0);
+  assert(p.maxCalories === 150, 'grass max calories is 150');
+  assert(p.growthPerTick === 2.5, 'grass grows 5× faster (2.5/tick)');
   p.calories = 20;
-  updatePlant(p, null, () => true);
-  assert(p.calories > 20, 'plant grows on grass');
-  const before = p.calories;
-  updatePlant(p, null, () => false);
-  assert(p.calories === before - Wildborn.plant.WITHER_PER_TICK, 'plant withers off grass by 0.1');
+  updatePlant(p, null);
+  assert(p.calories === 22.5, 'plant grows on land without grass restriction');
+  const bush = createPlant('berry_bush', 0, 0);
+  assert(bush.maxCalories === 250, 'berry bush max is 250');
+  const tree = createPlant('fruit_tree', 0, 0);
+  assert(tree.maxCalories === 500, 'fruit tree max is 500');
+  const mush = createPlant('mushroom', 0, 0);
+  assert(mush.maxCalories === 200, 'mushroom max is 200');
+  const cactus = createPlant('cactus', 0, 0);
+  assert(cactus.maxCalories === 175, 'cactus max is 175');
 }
 
 // --- Unit: animal factory ---
 {
   const rabbit = Wildborn.animal.createAnimal('rabbit', 0, 0);
   assert(rabbit.diet === 'herbivore' && rabbit.maxCalories === 60, 'rabbit herbivore stats');
+  assert(rabbit.stamina === 100 && rabbit.maxStamina === 100, 'animals spawn with full stamina');
   const wolf = Wildborn.animal.createAnimal('wolf', 0, 0);
   assert(wolf.diet === 'predator' && wolf.special === 'howl', 'wolf predator stats');
   assert(wolf.state === 'ROAM', 'predators spawn in ROAM state');
   assert(wolf.spawnX === 0 && wolf.spawnY === 0, 'predator records spawn territory point');
   const cub = Wildborn.animal.createAnimal('deer', 0, 0, { isOffspring: true });
   assert(!cub.isAdult && cub.calories === cub.maxCalories * 0.2, 'offspring start at 20% calories');
+  assert(!HERBIVORE_SPECIES.chicken, 'chicken species removed');
 }
 
 // --- Unit: calorie burn ÷10 and speed halve ---
@@ -100,11 +109,71 @@ function assert(cond, msg) {
   assert(wolf.baseSpeed === 52.5, 'wolf baseSpeed uses halved fast');
 }
 
-// --- Unit: chicken egg timer 10× rarer ---
+// --- Unit: stamina drain / regen ---
 {
-  const chicken = Wildborn.animal.createAnimal('chicken', 0, 0);
-  assert(chicken.eggTimer >= 500, 'chicken egg timer base ≥ 500 (was ~50)');
-  assert(Wildborn.animal.EGG_TIMER_BASE === 500, 'EGG_TIMER_BASE is 500');
+  const rabbit = Wildborn.animal.createAnimal('rabbit', 0, 0);
+  rabbit.state = 'IDLE';
+  rabbit.vx = 0;
+  rabbit.vy = 0;
+  rabbit.stamina = 50;
+  Wildborn.animal.tickAnimal(rabbit, {
+    rng: createRng('stam'),
+    tickSeconds: 0.5,
+    isWater: () => false,
+    findNearestPlant: () => null,
+    findNearestAnimal: () => null,
+    queryAnimals: () => [],
+  });
+  assert(rabbit.stamina === 52, 'idle regenerates +2 stamina/tick');
+
+  rabbit.state = 'FLEE';
+  rabbit._fleeExhausted = false;
+  rabbit.stamina = 10;
+  rabbit.diet = 'herbivore';
+  Wildborn.animal.tickAnimal(rabbit, {
+    rng: createRng('stam2'),
+    tickSeconds: 0.5,
+    isWater: () => false,
+    findNearestPlant: () => null,
+    findNearestAnimal: () => null,
+    queryAnimals: () => [],
+  });
+  assert(rabbit.stamina === 7, 'flee drains -3 stamina/tick');
+  assert(rabbit._fleeExhausted === false, 'not exhausted above 0');
+
+  rabbit.stamina = 0;
+  Wildborn.animal.tickAnimal(rabbit, {
+    rng: createRng('stam3'),
+    tickSeconds: 0.5,
+    isWater: () => false,
+    findNearestPlant: () => null,
+    findNearestAnimal: () => null,
+    queryAnimals: () => [],
+  });
+  assert(rabbit._fleeExhausted === true, 'stamina 0 marks flee exhausted');
+}
+
+// --- Unit: sleep enter / wake ---
+{
+  const deer = Wildborn.animal.createAnimal('deer', 0, 0);
+  deer.calories = deer.maxCalories;
+  deer.state = 'IDLE';
+  deer.idleAccum = 5;
+  const ctx = {
+    rng: createRng('sleep-test'),
+    tickSeconds: 0.5,
+    isWater: () => false,
+    findNearestPlant: () => null,
+    findNearestAnimal: () => null,
+    queryAnimals: () => [],
+  };
+  Wildborn.animal.updateAnimal(deer, 0.1, ctx);
+  assert(deer.state === 'SLEEP', 'full animal enters SLEEP after 5s idle');
+
+  deer.sleepTimer = 10;
+  deer.calories = deer.maxCalories * 0.65;
+  Wildborn.animal.updateAnimal(deer, 0.1, ctx);
+  assert(deer.state === 'IDLE', 'wakes when calories drop below 70%');
 }
 
 // --- Unit: predator hunt threshold / satiation ---
@@ -116,8 +185,6 @@ function assert(cond, msg) {
     isWater: () => false,
     findNearestPlant: () => null,
     findNearestAnimal: () => null,
-    findNearestEgg: () => null,
-    hasEggFromChicken: () => false,
     queryAnimals: () => [],
     spawnPoop: () => {},
     spawnSplash: () => {},
@@ -154,6 +221,7 @@ function assert(cond, msg) {
   for (const id of plantIds) {
     assert(!!Wildborn.shapes.getSpeciesDef(id), 'shape def for plant ' + id);
   }
+  assert(!Wildborn.shapes.getSpeciesDef('chicken'), 'no chicken shape def');
 
   // Minimal canvas mock — ensures renderShape stays under a small draw budget
   let calls = 0;
@@ -201,6 +269,8 @@ function assert(cond, msg) {
       state: 'IDLE',
       calories: 40,
       maxCalories: 50,
+      stamina: 80,
+      maxStamina: 100,
       sex: 'male',
       isAdult: true,
       id: 1,
@@ -211,6 +281,7 @@ function assert(cond, msg) {
   // JSON file stays in sync with inline defs for key fields
   const json = JSON.parse(fs.readFileSync(path.join(root, 'src/shapes.json'), 'utf8'));
   assert(json.herbivores.rabbit && json.predators.wolf && json.plants.grass, 'shapes.json has core species');
+  assert(!json.herbivores.chicken, 'shapes.json has no chicken');
   assert(
     json.herbivores.rabbit.bodyColor === Wildborn.shapes.getSpeciesDef('rabbit').bodyColor,
     'shapes.json mirrors shapes.js for rabbit bodyColor'
@@ -235,26 +306,32 @@ function assert(cond, msg) {
     origin: { x: 0, y: 0 },
   });
 
-  assert(eco.plants.length === INITIAL_PLANT_COUNT, 'spawns 200 plants');
+  assert(eco.plants.length === INITIAL_PLANT_COUNT, 'spawns 2000 plants');
+  assert(INITIAL_PLANT_COUNT === 2000, 'INITIAL_PLANT_COUNT is 2000');
 
-  // Plants should be on grass tiles
-  let plantsOnGrass = 0;
+  // Plants should be on land (not water)
+  let plantsOnLand = 0;
+  let plantsOnWater = 0;
   for (const p of eco.plants) {
-    if (world.isGrass(world.getTileAtPixel(p.x, p.y))) plantsOnGrass++;
+    const tile = world.getTileAtPixel(p.x, p.y);
+    if (world.isSlow(tile)) plantsOnWater++;
+    else if (!world.isSolid(tile)) plantsOnLand++;
   }
-  assert(plantsOnGrass === eco.plants.length, 'all plants spawned on grass (' + plantsOnGrass + '/' + eco.plants.length + ')');
+  assert(plantsOnWater === 0, 'no plants spawned on water');
+  assert(plantsOnLand === eco.plants.length, 'all plants spawned on land (' + plantsOnLand + '/' + eco.plants.length + ')');
 
   // Predators start roaming (not hunting) when well-fed
   const wolves = eco.animals.filter((a) => a.species === 'wolf');
   assert(wolves.every((w) => w.state === 'ROAM'), 'well-fed wolves start in ROAM');
 
-  const herbExpected = { rabbit: 10, deer: 8, cow: 6, raccoon: 5, bison: 4, chicken: 15, ostrich: 3, turtle: 5, lizard: 8 };
+  const herbExpected = { rabbit: 10, deer: 8, cow: 6, raccoon: 5, bison: 4, ostrich: 3, turtle: 5, lizard: 8 };
   const predExpected = { wolf: 4, lion: 3, panther: 2, bear: 2, alligator: 3 };
 
   const counts = {};
   for (const a of eco.animals) {
     counts[a.species] = (counts[a.species] || 0) + 1;
   }
+  assert(!counts.chicken, 'no chickens spawned');
   for (const id in herbExpected) {
     assert(counts[id] === herbExpected[id], `spawn ${id}: ${counts[id]} === ${herbExpected[id]}`);
   }
@@ -271,7 +348,9 @@ function assert(cond, msg) {
   const stats = eco.getDebugStats();
   assert(stats.tick >= 100, 'ecosystem advanced many ticks (' + stats.tick + ')');
   assert(stats.plantsAlive > 0, 'plants still alive after simulation (' + stats.plantsAlive + ')');
+  assert(stats.plantsMax === 2000, 'debug stats expose plant max 2000');
   assert(stats.herbTotal + stats.predTotal > 0, 'animals still alive (' + (stats.herbTotal + stats.predTotal) + ')');
+  assert(stats.eggs == null, 'eggs removed from stats');
 
   // Some eating / hunger should have changed averages from spawn defaults
   assert(typeof stats.avgCalories.rabbit === 'number', 'avg calories tracked for rabbit');
@@ -289,12 +368,30 @@ function assert(cond, msg) {
   // Natural breeding should have grown some populations during the sim
   const naturalGrowth =
     stats.herbivores.rabbit > 10 ||
-    stats.herbivores.chicken > 15 ||
     stats.herbivores.lizard > 8 ||
     stats.predators.wolf > 4;
   assert(naturalGrowth, 'natural breeding grew at least one population during sim');
 
   console.log('\nFinal stats:', JSON.stringify(stats, null, 2));
+}
+
+// --- Ensure no chicken/egg references remain in source ---
+{
+  const srcFiles = [
+    'src/animal.js',
+    'src/ecosystem.js',
+    'src/plant.js',
+    'src/render.js',
+    'src/renderShapes.js',
+    'src/shapes.js',
+    'src/shapes.json',
+  ];
+  for (const f of srcFiles) {
+    const text = fs.readFileSync(path.join(root, f), 'utf8');
+    assert(!/chicken/i.test(text), f + ' has no chicken references');
+    // Allow "egg" only if somehow needed — should be gone
+    assert(!/\begg\b/i.test(text), f + ' has no egg references');
+  }
 }
 
 if (failed) {

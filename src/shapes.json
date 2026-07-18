@@ -7,7 +7,7 @@
       "accentColor": "#a03050",
       "berryColor": "#c04060",
       "size": 10,
-      "berryCalorieThreshold": 30,
+      "berryCalorieThreshold": 150,
       "clusterCount": 4
     },
     "grass": {
@@ -34,7 +34,7 @@
       "canopyColor": "#2a6a1e",
       "fruitColor": "#e08030",
       "size": 14,
-      "fruitCalorieThreshold": 50
+      "fruitCalorieThreshold": 250
     },
     "cactus": {
       "label": "Cactus",
@@ -118,22 +118,6 @@
       "tail": "bushy",
       "legs": "short_thick",
       "features": ["shoulder_hump"]
-    },
-    "chicken": {
-      "label": "Chicken",
-      "category": "herbivore",
-      "bodyColor": "#f5f0e0",
-      "combColor": "#c03030",
-      "wattleColor": "#c04040",
-      "beakColor": "#e0a030",
-      "tailColor": "#d8c8a0",
-      "eyeColor": "#ffffff",
-      "size": 7,
-      "body": "small_round",
-      "ears": "comb",
-      "tail": "fan",
-      "legs": "two_thin",
-      "features": ["beak", "wattle"]
     },
     "ostrich": {
       "label": "Ostrich",

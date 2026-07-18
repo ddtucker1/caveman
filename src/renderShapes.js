@@ -51,6 +51,17 @@
     // Facing
     if (!facingRight) ctx.scale(-1, 1);
 
+    // Sleep: lie on side (tilt toward π/2)
+    if ((state === 'SLEEP' || opts.sleeping) && state !== 'DEAD') {
+      const tilt = opts.sleepTilt != null ? opts.sleepTilt : Math.PI / 2;
+      ctx.rotate(facingRight ? tilt : -tilt);
+    }
+
+    // Sleep: dim to ~80% brightness
+    if ((state === 'SLEEP' || opts.sleeping) && state !== 'DEAD') {
+      ctx.globalAlpha *= 0.8;
+    }
+
     // Shared animation transforms
     const anim = computeAnim(opts, time, state, entityType);
     ctx.translate(anim.ox, anim.oy);
@@ -88,9 +99,18 @@
 
     ctx.restore();
 
-    // Calorie bar for plants (screen space, above entity)
-    if (def.category === 'plant' && state !== 'DEAD') {
-      drawCalorieBar(ctx, x, y, sz, calRatio);
+    // Calorie bar (plants always; animals always when alive)
+    if (state !== 'DEAD') {
+      if (def.category === 'plant') {
+        drawCalorieBar(ctx, x, y, sz, calRatio);
+      } else if (def.category === 'herbivore' || def.category === 'predator') {
+        drawCalorieBar(ctx, x, y, sz, calRatio);
+        const stamina = opts.stamina != null ? opts.stamina : 100;
+        const maxStamina = opts.maxStamina != null ? opts.maxStamina : 100;
+        if (stamina < maxStamina) {
+          drawStaminaBar(ctx, x, y, sz, stamina / maxStamina);
+        }
+      }
     }
 
     // Aggro / status icons (screen space)
@@ -102,9 +122,11 @@
         ctx.fillText('!', x, y - sz * 0.85);
         ctx.textAlign = 'start';
       }
-      if (opts.sleeping) {
-        drawZzz(ctx, x, y - sz * 0.7, time);
-      }
+    }
+
+    // Zzz particles (sleep) — screen space
+    if ((state === 'SLEEP' || opts.sleeping) && state !== 'DEAD') {
+      drawZzzParticles(ctx, x, y - sz * 0.5, opts.zzzParticles, time);
     }
 
     // Flee motion lines (screen space, behind facing)
@@ -135,14 +157,14 @@
     }
 
     // Idle breathing 1.0 → 1.02 over 2s
-    if (!moving && (state === 'IDLE' || state === 'BREEDING')) {
+    if (!moving && (state === 'IDLE' || state === 'BREEDING' || state === 'SLEEP')) {
       const breath = 1 + 0.02 * Math.sin((t / 2) * Math.PI * 2);
       sx = breath;
       sy = 2 - breath;
     }
 
     // Move bob
-    if (moving && state !== 'EATING') {
+    if (moving && state !== 'EATING' && state !== 'SLEEP') {
       oy = Math.sin(t * 8 + speed) * Math.min(1.6, 0.8 + speed * 0.01);
     }
 
@@ -154,7 +176,7 @@
     }
 
     // Flee lean forward
-    if (state === 'FLEE' || opts.fleeing) {
+    if ((state === 'FLEE' || opts.fleeing) && state !== 'SLEEP') {
       rot = opts.counterAttack ? -0.15 : 0.18;
       ox += opts.counterAttack ? 1.5 * Math.sin(t * 14) : 0;
     }
@@ -171,12 +193,22 @@
       oy -= 3;
     }
 
+    // Exhausted pant: mouth opens/closes ~3×/sec + slight body pulse
+    if (opts.panting) {
+      const pant = Math.sin(t * Math.PI * 6);
+      opts._jawOpen = 0.35 + 0.55 * (0.5 + 0.5 * pant);
+      sx *= 1 + 0.04 * pant;
+      sy *= 1 - 0.03 * pant;
+    }
+
     // Rabbit ear twitch encoded as slight vertical ear offset via opts
     opts._earTwitch = Math.sin(t * 6) > 0.92 ? -1.5 : 0;
     // Lizard tongue
     opts._tongueOut = Math.sin(t * 2.1 + idPhase) > 0.88;
-    // Jaw chew
-    opts._jawOpen = state === 'EATING' ? 0.5 + 0.5 * Math.sin(t * 12) : opts.hunting ? 0.7 : 0.15;
+    // Jaw chew (unless panting overrides)
+    if (!opts.panting) {
+      opts._jawOpen = state === 'EATING' ? 0.5 + 0.5 * Math.sin(t * 12) : opts.hunting ? 0.7 : 0.15;
+    }
 
     return { ox: ox, oy: oy, sx: sx, sy: sy, rot: rot, headDip: headDip };
   }
@@ -201,7 +233,25 @@
     if (ratio < 0.33) color = '#c05040';
     else if (ratio < 0.66) color = '#d4b84a';
     ctx.fillStyle = color;
-    ctx.fillRect(bx, by, w * ratio, h);
+    ctx.fillRect(bx, by, w * Math.max(0, Math.min(1, ratio)), h);
+  }
+
+  /** Stamina bar: 20×4px, floating below calorie bar. Hidden at full. */
+  function drawStaminaBar(ctx, x, y, sz, ratio) {
+    const bar = Wildborn.shapes.getShapeDefs().shared.calorieBar;
+    const w = 20;
+    const h = 4;
+    const bx = x - w / 2;
+    const by = y - sz * 0.55 + bar.offsetY + bar.height + 2;
+    const r = Math.max(0, Math.min(1, ratio));
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fillRect(bx, by, w, h);
+    // Green 100–60, Yellow 59–30, Red 29–0
+    let color = '#4caf50';
+    if (r * 100 <= 29) color = '#e53935';
+    else if (r * 100 <= 59) color = '#fbc02d';
+    ctx.fillStyle = color;
+    ctx.fillRect(bx, by, w * r, h);
   }
 
   function drawMotionLines(ctx, x, y, facingRight, sz) {
@@ -225,6 +275,23 @@
     ctx.fillText('z', x + 4, y - phase * 10);
     ctx.font = '8px sans-serif';
     ctx.fillText('z', x + 10, y - 6 - phase * 8);
+  }
+
+  /** Draw managed Zzz particles (1/sec, fade over 2s). */
+  function drawZzzParticles(ctx, x, y, particles, time) {
+    if (!particles || !particles.length) {
+      drawZzz(ctx, x, y, time || 0);
+      return;
+    }
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'center';
+    for (let i = 0; i < particles.length; i++) {
+      const z = particles[i];
+      const alpha = Math.max(0, Math.min(1, z.life / (z.maxLife || 2)));
+      ctx.fillStyle = 'rgba(200,200,220,' + (0.85 * alpha) + ')';
+      ctx.fillText('z', x + z.x, y + z.y);
+    }
+    ctx.textAlign = 'start';
   }
 
   function drawEye(ctx, ex, ey, color, lookX, lookY) {
@@ -380,7 +447,6 @@
     else if (type === 'cow') drawCow(ctx, def, sz, opts, lookX, lookY, headY);
     else if (type === 'raccoon') drawRaccoon(ctx, def, sz, opts, lookX, lookY, headY);
     else if (type === 'bison') drawBison(ctx, def, sz, opts, lookX, lookY, headY);
-    else if (type === 'chicken') drawChicken(ctx, def, sz, opts, lookX, lookY, headY);
     else if (type === 'ostrich') drawOstrich(ctx, def, sz, opts, lookX, lookY, headY);
     else if (type === 'turtle') drawTurtle(ctx, def, sz, opts, lookX, lookY, headY);
     else if (type === 'lizard') drawLizard(ctx, def, sz, opts, lookX, lookY, headY);
@@ -574,52 +640,6 @@
     ctx.ellipse(-sz * 0.5, headY + sz * 0.05, sz * 0.1, sz * 0.14, 0.4, 0, Math.PI * 2);
     ctx.fill();
     drawEye(ctx, sz * 0.52, headY - sz * 0.1, def.eyeColor, lookX, lookY);
-  }
-
-  function drawChicken(ctx, def, sz, opts, lookX, lookY, headY) {
-    // Legs
-    ctx.strokeStyle = def.beakColor;
-    ctx.lineWidth = 1.2;
-    ctx.beginPath();
-    ctx.moveTo(-1, sz * 0.2);
-    ctx.lineTo(-2, sz * 0.42);
-    ctx.moveTo(2, sz * 0.2);
-    ctx.lineTo(3, sz * 0.42);
-    ctx.stroke();
-    // Body
-    ctx.fillStyle = def.bodyColor;
-    ctx.beginPath();
-    ctx.arc(0, headY, sz * 0.38, 0, Math.PI * 2);
-    ctx.fill();
-    // Fan tail
-    ctx.fillStyle = def.tailColor;
-    ctx.beginPath();
-    ctx.moveTo(-sz * 0.3, headY);
-    ctx.lineTo(-sz * 0.55, headY - sz * 0.25);
-    ctx.lineTo(-sz * 0.4, headY + sz * 0.1);
-    ctx.fill();
-    // Comb
-    ctx.fillStyle = def.combColor;
-    ctx.beginPath();
-    ctx.moveTo(sz * 0.05, headY - sz * 0.35);
-    ctx.lineTo(sz * 0.12, headY - sz * 0.55);
-    ctx.lineTo(sz * 0.2, headY - sz * 0.35);
-    ctx.lineTo(sz * 0.28, headY - sz * 0.5);
-    ctx.lineTo(sz * 0.32, headY - sz * 0.3);
-    ctx.fill();
-    // Beak
-    ctx.fillStyle = def.beakColor;
-    ctx.beginPath();
-    ctx.moveTo(sz * 0.35, headY - sz * 0.05);
-    ctx.lineTo(sz * 0.55, headY);
-    ctx.lineTo(sz * 0.35, headY + sz * 0.05);
-    ctx.fill();
-    // Wattle
-    ctx.fillStyle = def.wattleColor;
-    ctx.beginPath();
-    ctx.ellipse(sz * 0.28, headY + sz * 0.12, 1.5, 2.2, 0, 0, Math.PI * 2);
-    ctx.fill();
-    drawEye(ctx, sz * 0.22, headY - sz * 0.12, def.eyeColor, lookX, lookY);
   }
 
   function drawOstrich(ctx, def, sz, opts, lookX, lookY, headY) {
