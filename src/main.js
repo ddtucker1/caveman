@@ -20,6 +20,9 @@
     drawPlayer,
     drawEcosystem,
     drawEcosystemDebug,
+    drawLegend,
+    drawTooltip,
+    pickEntityAt,
     updateHud,
     setSeedDisplay,
     drawDebug,
@@ -45,6 +48,11 @@
     fpsAccum: 0,
     fpsFrames: 0,
     showEcosystemDebug: !!config.ecosystemDebugOverlay,
+    showLegend: !!config.showLegend,
+    mouseX: 0,
+    mouseY: 0,
+    hoverEntity: null,
+    time: 0,
   };
 
   // ---------------------------------------------------------------------------
@@ -92,6 +100,14 @@
       game.showEcosystemDebug = !game.showEcosystemDebug;
       config.ecosystemDebugOverlay = game.showEcosystemDebug;
       e.preventDefault();
+      return;
+    }
+
+    // L — toggle species legend
+    if (e.code === 'KeyL' && state === 'playing') {
+      game.showLegend = !game.showLegend;
+      config.showLegend = game.showLegend;
+      e.preventDefault();
     }
   });
 
@@ -101,6 +117,12 @@
       game.keys[dir] = false;
       e.preventDefault();
     }
+  });
+
+  canvas.addEventListener('mousemove', function (e) {
+    const rect = canvas.getBoundingClientRect();
+    game.mouseX = e.clientX - rect.left;
+    game.mouseY = e.clientY - rect.top;
   });
 
   // ---------------------------------------------------------------------------
@@ -167,10 +189,12 @@
     menuEl.classList.add('hidden');
     state = 'playing';
     game.lastTime = performance.now();
+    game.time = 0;
   }
 
   function update(dt) {
     const step = Math.min(dt, 0.05);
+    game.time += step;
 
     updatePlayer(game.player, game.keys, step, game.world);
     updateCamera(game.camera, game.player);
@@ -184,6 +208,14 @@
 
     if (game.ecosystem && config.ecosystemEnabled) {
       game.ecosystem.update(step);
+      game.hoverEntity = pickEntityAt(
+        game.ecosystem,
+        game.camera,
+        game.mouseX,
+        game.mouseY
+      );
+    } else {
+      game.hoverEntity = null;
     }
 
     updateHud(game.player);
@@ -193,10 +225,15 @@
     const w = window.innerWidth;
     const h = window.innerHeight;
     clear(ctx, w, h);
-    drawWorld(ctx, game.world, game.camera);
+    drawWorld(ctx, game.world, game.camera, game.time);
 
     if (game.ecosystem && config.ecosystemEnabled) {
-      drawEcosystem(ctx, game.ecosystem, game.camera);
+      drawEcosystem(ctx, game.ecosystem, game.camera, {
+        time: game.time,
+        showDebug: game.showEcosystemDebug,
+        showHuntLines: game.showEcosystemDebug,
+        hoverEntity: game.hoverEntity,
+      });
     }
 
     drawPlayer(ctx, game.player, game.camera);
@@ -212,6 +249,14 @@
 
     if (game.showEcosystemDebug && game.ecosystem) {
       drawEcosystemDebug(ctx, game.ecosystem.getDebugStats());
+    }
+
+    if (game.showLegend && game.ecosystem) {
+      drawLegend(ctx, game.ecosystem, game.ecosystem.getDebugStats());
+    }
+
+    if (game.hoverEntity) {
+      drawTooltip(ctx, game.hoverEntity, game.mouseX, game.mouseY);
     }
   }
 

@@ -15,6 +15,8 @@ const files = [
   'src/plant.js',
   'src/animal.js',
   'src/ecosystem.js',
+  'src/shapes.js',
+  'src/renderShapes.js',
 ];
 
 for (const f of files) {
@@ -71,6 +73,83 @@ function assert(cond, msg) {
   assert(wolf.diet === 'predator' && wolf.special === 'howl', 'wolf predator stats');
   const cub = Wildborn.animal.createAnimal('deer', 0, 0, { isOffspring: true });
   assert(!cub.isAdult && cub.calories === cub.maxCalories * 0.2, 'offspring start at 20% calories');
+}
+
+// --- Unit: shape defs cover every species + renderShape is callable ---
+{
+  const herbIds = Object.keys(Wildborn.animal.HERBIVORE_SPECIES);
+  const predIds = Object.keys(Wildborn.animal.PREDATOR_SPECIES);
+  const plantIds = Object.keys(Wildborn.plant.PLANT_SPECIES);
+  for (const id of herbIds) {
+    assert(!!Wildborn.shapes.getSpeciesDef(id), 'shape def for herbivore ' + id);
+  }
+  for (const id of predIds) {
+    assert(!!Wildborn.shapes.getSpeciesDef(id), 'shape def for predator ' + id);
+  }
+  for (const id of plantIds) {
+    assert(!!Wildborn.shapes.getSpeciesDef(id), 'shape def for plant ' + id);
+  }
+
+  // Minimal canvas mock — ensures renderShape stays under a small draw budget
+  let calls = 0;
+  const ctx = {
+    save() { calls++; },
+    restore() { calls++; },
+    translate() { calls++; },
+    scale() { calls++; },
+    rotate() { calls++; },
+    beginPath() { calls++; },
+    closePath() { calls++; },
+    moveTo() { calls++; },
+    lineTo() { calls++; },
+    quadraticCurveTo() { calls++; },
+    arc() { calls++; },
+    ellipse() { calls++; },
+    arcTo() { calls++; },
+    fill() { calls++; },
+    stroke() { calls++; },
+    fillRect() { calls++; },
+    strokeRect() { calls++; },
+    fillText() { calls++; },
+    createLinearGradient() {
+      calls++;
+      return { addColorStop() { calls++; } };
+    },
+    set fillStyle(v) { calls++; },
+    set strokeStyle(v) { calls++; },
+    set lineWidth(v) { calls++; },
+    set globalAlpha(v) { calls++; },
+    get globalAlpha() { return 1; },
+    set globalCompositeOperation(v) { calls++; },
+    set shadowColor(v) { calls++; },
+    set shadowBlur(v) { calls++; },
+    set font(v) { calls++; },
+    set textAlign(v) { calls++; },
+    setLineDash() { calls++; },
+  };
+
+  const all = herbIds.concat(predIds, plantIds);
+  for (const id of all) {
+    calls = 0;
+    Wildborn.renderShapes.renderShape(ctx, id, 0, 0, 1, true, {
+      time: 1.5,
+      state: 'IDLE',
+      calories: 40,
+      maxCalories: 50,
+      sex: 'male',
+      isAdult: true,
+      id: 1,
+    });
+    assert(calls > 0 && calls < 80, 'renderShape(' + id + ') draw ops=' + calls + ' (<80)');
+  }
+
+  // JSON file stays in sync with inline defs for key fields
+  const json = JSON.parse(fs.readFileSync(path.join(root, 'src/shapes.json'), 'utf8'));
+  assert(json.herbivores.rabbit && json.predators.wolf && json.plants.grass, 'shapes.json has core species');
+  assert(
+    json.herbivores.rabbit.bodyColor === Wildborn.shapes.getSpeciesDef('rabbit').bodyColor,
+    'shapes.json mirrors shapes.js for rabbit bodyColor'
+  );
 }
 
 // --- Integration: ecosystem spawn counts ---
