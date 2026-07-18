@@ -574,6 +574,27 @@
       ctx.arc(s.x, s.y, animal.size * 0.65, 0, Math.PI * 2);
       ctx.stroke();
     }
+
+    // Subtle glow pulse when ready to reproduce (calories ≥ 80% and cooldown done)
+    if (
+      animal.alive &&
+      animal.isAdult &&
+      animal.state !== 'DEAD' &&
+      Wildborn.animal &&
+      typeof Wildborn.animal.canBreed === 'function' &&
+      Wildborn.animal.canBreed(animal)
+    ) {
+      const pulse = 0.25 + 0.2 * Math.sin(performance.now() * 0.004 + animal.id * 0.7);
+      ctx.save();
+      ctx.shadowColor = 'rgba(180, 220, 140, ' + pulse.toFixed(3) + ')';
+      ctx.shadowBlur = 10 + pulse * 14;
+      ctx.strokeStyle = 'rgba(180, 220, 140, ' + (pulse * 0.55).toFixed(3) + ')';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, animal.size * 0.85, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -692,7 +713,6 @@
     if (s === 'SLEEP') return 'Sleeping';
     if (s === 'EATING') return 'Eating';
     if (s === 'FLEE') return entity._counterAttack ? 'Attacking' : 'Fleeing';
-    if (s === 'BREEDING' || s === 'SEEK_MATE') return 'Breeding';
     if (s === 'SEEK_FOOD' || s === 'SEEK_PREY') {
       if (
         (entity.diet === 'predator' || entity.diet === 'omnivore') &&

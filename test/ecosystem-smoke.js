@@ -157,7 +157,9 @@ function assert(cond, msg) {
   assert(wolf.spawnX === 0 && wolf.spawnY === 0, 'predator records spawn territory point');
   const cub = Wildborn.animal.createAnimal('deer', 0, 0, { isOffspring: true });
   assert(!cub.isAdult && cub.calories === cub.maxCalories * 0.2, 'offspring start at 20% calories');
+  assert(cub.growth === 0.2 && cub.size === cub.baseSize * 0.2, 'offspring start at 20% adult size');
   assert(!HERBIVORE_SPECIES.chicken, 'chicken species removed');
+  assert(!Wildborn.animal.AI_STATE.SEEK_MATE && !Wildborn.animal.AI_STATE.BREEDING, 'mate-seeking states removed');
 }
 
 // --- Unit: calorie burn ÷10 and speed halve ---
@@ -477,36 +479,37 @@ function assert(cond, msg) {
   // Some eating / hunger should have changed averages from spawn defaults
   assert(typeof stats.avgCalories.rabbit === 'number', 'avg calories tracked for rabbit');
 
-  // Breeding unit path: breed() directly produces 1–3 offspring
+  // Asexual reproduction unit path: breed() produces exactly 1 offspring at parent
   const deerA = Wildborn.animal.createAnimal('deer', 100, 100);
-  const deerB = Wildborn.animal.createAnimal('deer', 110, 100);
   deerA.calories = deerA.maxCalories;
-  deerB.calories = deerB.maxCalories;
-  const kids = Wildborn.animal.breed(deerA, deerB, rng);
-  assert(kids.length >= 1 && kids.length <= 3, 'breed() yields 1–3 offspring (' + kids.length + ')');
-  assert(kids.every((k) => !k.isAdult && k.species === 'deer'), 'offspring are juvenile deer');
+  deerA.breedingCooldown = 0;
+  assert(Wildborn.animal.canBreed(deerA), 'well-fed adult with cooldown 0 can breed');
+  assert(Wildborn.animal.BREED_COOLDOWN === 2400, 'breed cooldown is 1200s (2400 ticks)');
+  assert(Wildborn.animal.BREED_CALORIE_RATIO === 0.8, 'breed requires ≥80% calories');
+  const kids = Wildborn.animal.breed(deerA);
+  assert(kids.length === 1, 'breed() yields exactly 1 offspring (' + kids.length + ')');
+  assert(kids[0].species === 'deer' && !kids[0].isAdult, 'offspring is a juvenile deer');
+  assert(kids[0].x === deerA.x && kids[0].y === deerA.y, 'offspring spawns at parent location');
+  assert(kids[0].growth === 0.2 && kids[0].size === kids[0].baseSize * 0.2, 'offspring starts at 20% size');
   assert(deerA.breedingCooldown === Wildborn.animal.BREED_COOLDOWN, 'breeding cooldown applied');
+  assert(!Wildborn.animal.canBreed(deerA), 'parent cannot breed again until cooldown ends');
 
-  // Ecosystem breeding path (deterministic): on 400×400 animals rarely meet in 60s,
-  // so place two fertile mates adjacent and confirm the tick loop produces offspring.
+  // Ecosystem asexual path: one fertile adult reproduces on the next tick without a mate
   const beforeCount = eco.animals.length;
-  const mateA = Wildborn.animal.createAnimal('deer', 200, 200, { sex: 'female' });
-  const mateB = Wildborn.animal.createAnimal('deer', 210, 200, { sex: 'male' });
-  mateA.calories = mateA.maxCalories;
-  mateB.calories = mateB.maxCalories;
-  mateA.breedingCooldown = 0;
-  mateB.breedingCooldown = 0;
-  mateA.state = Wildborn.animal.AI_STATE.SEEK_MATE;
-  mateB.state = Wildborn.animal.AI_STATE.SEEK_MATE;
-  eco.animals.push(mateA, mateB);
-  for (let i = 0; i < 30 * 5; i++) {
+  const parent = Wildborn.animal.createAnimal('deer', 200, 200);
+  parent.calories = parent.maxCalories;
+  parent.breedingCooldown = 0;
+  eco.animals.push(parent);
+  // Need ≥0.5s accumulated for one ecosystem tick (dt = 1/30)
+  for (let i = 0; i < 30; i++) {
     eco.update(dt);
   }
   const afterStats = eco.getDebugStats();
   assert(
-    eco.animals.length > beforeCount + 2 || afterStats.herbivores.deer > 8,
-    'ecosystem breeding path produces offspring (' + eco.animals.length + ' animals, deer=' + afterStats.herbivores.deer + ')'
+    eco.animals.length > beforeCount + 1 || afterStats.herbivores.deer > 8,
+    'ecosystem asexual path produces offspring (' + eco.animals.length + ' animals, deer=' + afterStats.herbivores.deer + ')'
   );
+  assert(parent.breedingCooldown > 0, 'parent cooldown set after ecosystem reproduction');
 
   console.log('\nFinal stats:', JSON.stringify(afterStats, null, 2));
 }

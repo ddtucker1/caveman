@@ -1,8 +1,8 @@
 /**
  * Ecosystem animals — herbivores & predators with a shared state machine,
- * hunger, combat, grouping, and breeding.
+ * hunger, combat, grouping, and asexual reproduction.
  *
- * States: IDLE → SEEK_FOOD → EATING → FLEE → SEEK_MATE → BREEDING → SLEEP → DEAD
+ * States: IDLE → SEEK_FOOD → EATING → FLEE → ROAM → SLEEP → DEAD
  */
 (function (global) {
   const Wildborn = (global.Wildborn = global.Wildborn || {});
@@ -13,8 +13,6 @@
     SEEK_PREY: 'SEEK_PREY',
     EATING: 'EATING',
     FLEE: 'FLEE',
-    SEEK_MATE: 'SEEK_MATE',
-    BREEDING: 'BREEDING',
     ROAM: 'ROAM',
     SLEEP: 'SLEEP',
     DEAD: 'DEAD',
@@ -266,9 +264,12 @@
   const ALL_SPECIES = Object.assign({}, HERBIVORE_SPECIES, PREDATOR_SPECIES);
 
   // Timing / thresholds
-  const ADULT_AGE = 30;
-  const BREED_COOLDOWN = 100;
-  const BREED_CALORIE_RATIO = 0.7;
+  /** Ticks for juvenile growth 20% → 100% at +1%/tick. */
+  const ADULT_AGE = 80;
+  /** 1200s reproduction cooldown at 0.5s/tick → 2400 ticks. */
+  const BREED_COOLDOWN = 2400;
+  /** Calories must be ≥ 80% of max to reproduce. */
+  const BREED_CALORIE_RATIO = 0.8;
   const HUNGER_SEEK_RATIO = 0.3;
   /** Ticks in one "day" for calorie drain (120 × 0.5s ≈ 60s real time). */
   const DAY_TICKS = 120;
@@ -279,7 +280,6 @@
   /** Animals must be within 20px of a plant to eat it. */
   const EAT_RANGE = 20;
   const ATTACK_RANGE = 22;
-  const MATE_RANGE = 28;
   const FLEE_DETECT_RANGE = 160;
   /** Herbivores enter FLEE when a predator is within this range. */
   const FLEE_ENTER_RANGE = 100;
@@ -379,14 +379,16 @@
       maxStamina: STAMINA_MAX,
 
       age: isOffspring ? 0 : ADULT_AGE + Math.floor(Math.random() * 20),
-      breedingCooldown: isOffspring ? BREED_COOLDOWN : Math.floor(Math.random() * 40),
-      growth: isOffspring ? 0.2 : 1, // scale toward adult size
+      /** Per-animal reproduction cooldown in ticks (persists with animal state). */
+      breedingCooldown: isOffspring
+        ? BREED_COOLDOWN
+        : Math.floor(Math.random() * BREED_COOLDOWN),
+      growth: isOffspring ? 0.2 : 1, // 20% → 100% adult size
       isAdult: !isOffspring,
 
       state: isPred ? AI_STATE.ROAM : AI_STATE.IDLE,
       stateTimer: 0,
       target: null,
-      mateTarget: null,
       fleeFrom: null,
       /** Accumulated seconds in IDLE/ROAM toward nap. */
       idleAccum: 0,
@@ -420,7 +422,7 @@
       color: def.color,
       accent: def.accent || null,
       baseSize: def.size,
-      size: isOffspring ? def.size * 0.4 : def.size,
+      size: isOffspring ? def.size * 0.2 : def.size,
 
       attackCooldown: 0,
       packCallTimer: 0, // seconds remaining for pack to join
@@ -461,16 +463,14 @@
     return a.diet === 'predator' || a.diet === 'omnivore';
   }
 
+  /** Ready to reproduce asexually: adult, calories ≥ 80%, cooldown expired. */
   function canBreed(a) {
     return (
       a.alive &&
       a.isAdult &&
       a.state !== AI_STATE.DEAD &&
-      a.state !== AI_STATE.FLEE &&
-      a.state !== AI_STATE.SLEEP &&
       a.breedingCooldown <= 0 &&
-      a.calories > a.maxCalories * BREED_CALORIE_RATIO &&
-      a.state !== AI_STATE.BREEDING
+      a.calories >= a.maxCalories * BREED_CALORIE_RATIO
     );
   }
 
@@ -485,7 +485,6 @@
     animal.vx = 0;
     animal.vy = 0;
     animal.target = null;
-    animal.mateTarget = null;
     animal.fleeFrom = null;
     animal.idleAccum = 0;
     animal.sleepTimer = 0;
@@ -746,7 +745,6 @@
     animal.corpseDecay = 80; // ticks until corpse vanishes
     animal.deadAt = null; // render sets wall-clock time on first draw
     animal.target = null;
-    animal.mateTarget = null;
     if (killer && killer.alive) {
       // Killer may immediately start eating
       killer.target = animal;
@@ -755,30 +753,16 @@
   }
 
   /**
-   * Spawn 1–3 offspring near parents.
+   * Asexual reproduction: spawn 1 offspring at the parent's location.
    * @returns {object[]}
    */
-  function breed(parentA, parentB, rng) {
-    const count = rng.int(1, 3);
-    const kids = [];
-    for (let i = 0; i < count; i++) {
-      const ox = parentA.x + rng.range(-12, 12);
-      const oy = parentA.y + rng.range(-12, 12);
-      const kid = createAnimal(parentA.species, ox, oy, {
-        isOffspring: true,
-        groupId: parentA.groupId || parentB.groupId,
-      });
-      kids.push(kid);
-    }
-    parentA.breedingCooldown = BREED_COOLDOWN;
-    parentB.breedingCooldown = BREED_COOLDOWN;
-    parentA.state = defaultRestState(parentA);
-    parentB.state = defaultRestState(parentB);
-    parentA.mateTarget = null;
-    parentB.mateTarget = null;
-    parentA.calories *= 0.85;
-    parentB.calories *= 0.85;
-    return kids;
+  function breed(parent) {
+    const kid = createAnimal(parent.species, parent.x, parent.y, {
+      isOffspring: true,
+      groupId: parent.groupId,
+    });
+    parent.breedingCooldown = BREED_COOLDOWN;
+    return [kid];
   }
 
   // ---------------------------------------------------------------------------
@@ -849,18 +833,6 @@
         animal.idleAccum = 0;
         updateFlee(animal, dt, ctx);
         break;
-      case AI_STATE.SEEK_MATE:
-        animal.idleAccum = 0;
-        updateSeekMate(animal, dt, ctx);
-        break;
-      case AI_STATE.BREEDING:
-        animal.idleAccum = 0;
-        // Brief pause while breeding resolves on tick
-        animal.stateTimer -= dt;
-        if (animal.stateTimer <= 0) {
-          animal.state = defaultRestState(animal);
-        }
-        break;
       case AI_STATE.SLEEP:
         updateSleep(animal, dt, ctx);
         break;
@@ -876,7 +848,6 @@
   function updatePredatorHungerGate(animal) {
     const ratio = hungerRatio(animal);
     if (animal.state === AI_STATE.DEAD || animal.state === AI_STATE.FLEE || animal.state === AI_STATE.SLEEP) return;
-    if (animal.state === AI_STATE.BREEDING || animal.state === AI_STATE.SEEK_MATE) return;
 
     if (animal.state === AI_STATE.SEEK_PREY || animal.state === AI_STATE.SEEK_FOOD || animal.state === AI_STATE.EATING) {
       if (ratio >= PREDATOR_SATIATED_RATIO) {
@@ -917,14 +888,6 @@
       animal.idleAccum >= SLEEP_IDLE_SECONDS
     ) {
       enterSleep(animal);
-      return;
-    }
-
-    // Occasional breeding while satiated
-    if (canBreed(animal) && animal.isAdult && ctx.rng.chance(0.02 * dt)) {
-      animal.idleAccum = 0;
-      animal.state = AI_STATE.SEEK_MATE;
-      animal.mateTarget = null;
       return;
     }
 
@@ -979,13 +942,6 @@
       animal.idleAccum = 0;
       animal.state = AI_STATE.SEEK_FOOD;
       animal.target = null;
-      return;
-    }
-
-    if (canBreed(animal) && animal.isAdult) {
-      animal.idleAccum = 0;
-      animal.state = AI_STATE.SEEK_MATE;
-      animal.mateTarget = null;
       return;
     }
 
@@ -1494,58 +1450,8 @@
     moveToward(animal, tx, ty, dt, fleeSpeed, ctx);
   }
 
-  function updateSeekMate(animal, dt, ctx) {
-    if (!canBreed(animal)) {
-      animal.state = defaultRestState(animal);
-      animal.mateTarget = null;
-      return;
-    }
-
-    // Interrupt for hunger / threats
-    if (isPredator(animal) && hungerRatio(animal) <= PREDATOR_HUNT_RATIO) {
-      animal.state = AI_STATE.SEEK_PREY;
-      animal._hunting = true;
-      return;
-    }
-    if (!isPredator(animal) && isHungry(animal)) {
-      animal.state = AI_STATE.SEEK_FOOD;
-      return;
-    }
-
-    if (!animal.mateTarget || !canBreed(animal.mateTarget) || animal.mateTarget.species !== animal.species) {
-      animal.mateTarget = ctx.findNearestAnimal(
-        animal.x,
-        animal.y,
-        FOOD_DETECT_RANGE * 0.7,
-        function (o) {
-          return o.id !== animal.id && canBreed(o) && o.species === animal.species;
-        }
-      );
-    }
-
-    if (!animal.mateTarget) {
-      wander(animal, dt, ctx.rng, ctx);
-      return;
-    }
-
-    const mate = animal.mateTarget;
-    const d2 = dist2(animal.x, animal.y, mate.x, mate.y);
-    if (d2 <= MATE_RANGE * MATE_RANGE) {
-      animal.state = AI_STATE.BREEDING;
-      mate.state = AI_STATE.BREEDING;
-      animal.stateTimer = 0.8;
-      mate.stateTimer = 0.8;
-      // EcosystemManager will finalize breed on tick when both BREEDING
-      animal._readyToBreed = true;
-      mate._readyToBreed = true;
-      return;
-    }
-
-    moveToward(animal, mate.x, mate.y, dt, 0.75, ctx);
-  }
-
   // ---------------------------------------------------------------------------
-  // Discrete tick (hunger, growth, eating calories, breeding age)
+  // Discrete tick (hunger, growth, eating calories, asexual reproduction)
   // ---------------------------------------------------------------------------
 
   /**
@@ -1576,10 +1482,10 @@
     } else if (state === AI_STATE.SEEK_PREY || (state === AI_STATE.SEEK_FOOD && isPredator(animal) && animal._hunting)) {
       regen = 0;
       drain = STAMINA_DRAIN_HUNT;
-    } else if (state === AI_STATE.IDLE || state === AI_STATE.ROAM || state === AI_STATE.BREEDING) {
+    } else if (state === AI_STATE.IDLE || state === AI_STATE.ROAM) {
       regen = STAMINA_REGEN;
       drain = moving ? STAMINA_DRAIN_WALK : 0;
-    } else if (state === AI_STATE.SEEK_FOOD || state === AI_STATE.SEEK_MATE) {
+    } else if (state === AI_STATE.SEEK_FOOD) {
       regen = STAMINA_REGEN;
       drain = moving ? STAMINA_DRAIN_WALK : 0;
     } else {
@@ -1620,12 +1526,12 @@
 
     updateStamina(animal);
 
-    // Age / growth
+    // Age / growth — juveniles start at 20% size, +1% per tick until adult
     animal.age += 1;
     if (!animal.isAdult) {
       animal.growth = Math.min(1, animal.growth + 0.01);
-      animal.size = animal.baseSize * (0.4 + 0.6 * animal.growth);
-      if (animal.age >= ADULT_AGE) {
+      animal.size = animal.baseSize * animal.growth;
+      if (animal.growth >= 1) {
         animal.isAdult = true;
         animal.growth = 1;
         animal.size = animal.baseSize;
@@ -1665,27 +1571,9 @@
       return result;
     }
 
-    // Breeding resolution (only one parent creates offspring)
-    if (animal.state === AI_STATE.BREEDING && animal._readyToBreed) {
-      const mate = animal.mateTarget;
-      if (
-        mate &&
-        mate.alive &&
-        mate._readyToBreed &&
-        mate.species === animal.species &&
-        animal.id < mate.id
-      ) {
-        const kids = breed(animal, mate, ctx.rng);
-        animal._readyToBreed = false;
-        mate._readyToBreed = false;
-        result.offspring = kids;
-      } else if (!mate || !mate.alive) {
-        animal._readyToBreed = false;
-        animal.mateTarget = null;
-        if (animal.alive) {
-          animal.state = defaultRestState(animal);
-        }
-      }
+    // Asexual reproduction: calorie ≥ 80% and cooldown expired → spawn 1 offspring
+    if (canBreed(animal)) {
+      result.offspring = breed(animal);
     }
 
     return result;
@@ -1732,6 +1620,7 @@
     ALL_SPECIES,
     ADULT_AGE,
     BREED_COOLDOWN,
+    BREED_CALORIE_RATIO,
     DAY_TICKS,
     CALORIE_BURN_DIVISOR,
     MIN_CALORIE_BURN,
