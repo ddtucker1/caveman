@@ -499,6 +499,7 @@
       spawnRadius: spawnRadius,
       mapTiles: mapTiles,
       mapPixelSize: mapPixelSize,
+      tickSeconds: tickSeconds,
       tickCount: function () {
         return tickCount;
       },

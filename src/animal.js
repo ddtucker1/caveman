@@ -270,7 +270,10 @@
   const BREED_COOLDOWN = 2400;
   /** Calories must be ≥ 80% of max to reproduce. */
   const BREED_CALORIE_RATIO = 0.8;
-  const HUNGER_SEEK_RATIO = 0.3;
+  /** Enter SEARCHING_FOR_FOOD at ≤50% calories. */
+  const HUNGER_SEEK_RATIO = 0.5;
+  /** Leave hunger-search and resume normal behavior at ≥60%. */
+  const HUNGER_RETURN_RATIO = 0.6;
   /** Ticks in one "day" for calorie drain (120 × 0.5s ≈ 60s real time). */
   const DAY_TICKS = 120;
   /** Global calorie burn scale — animals previously burned ~10× too fast. */
@@ -321,7 +324,7 @@
   const STAMINA_PANT_THRESHOLD = 20;
 
   /** Sleep / nap. */
-  const SLEEP_ENTER_RATIO = 0.8;
+  const SLEEP_ENTER_RATIO = 0.9;
   const SLEEP_WAKE_RATIO = 0.7;
   const SLEEP_IDLE_SECONDS = 5;
   const SLEEP_MIN_SECONDS = 10;
@@ -401,6 +404,15 @@
       _zzzSpawn: 0,
       /** Herbivore flee exhausted (walk instead of run). */
       _fleeExhausted: false,
+      /** True while in hunger-search (≤50% calories, orange eyes). */
+      _hungerSearch: false,
+      /** Expanding plant detect radius while hunger-searching (herbivores). */
+      _searchRadius: PLANT_SIGHT_RANGE,
+      /** Spiral-search state for predators in hunger-search. */
+      _spiralAngle: 0,
+      _spiralRadius: 0,
+      _spiralOriginX: null,
+      _spiralOriginY: null,
 
       groupId: opts.groupId != null ? opts.groupId : 0,
       maxGroupSize: def.maxGroupSize,
@@ -492,6 +504,7 @@
     animal._zzzSpawn = 0;
     animal.zzzParticles = [];
     animal._fleeExhausted = false;
+    clearHungerSearch(animal);
   }
 
   function wakeAnimal(animal) {
@@ -508,7 +521,35 @@
   }
 
   function isHungry(a) {
-    return hungerRatio(a) < HUNGER_SEEK_RATIO;
+    return hungerRatio(a) <= HUNGER_SEEK_RATIO;
+  }
+
+  function enterHungerSearch(animal) {
+    animal._hungerSearch = true;
+    animal.idleAccum = 0;
+    animal.target = null;
+    animal._searchRadius = FOOD_DETECT_RANGE;
+    animal._spiralAngle = 0;
+    animal._spiralRadius = TILE_SIZE * 2;
+    animal._spiralOriginX = animal.x;
+    animal._spiralOriginY = animal.y;
+    animal.state = AI_STATE.SEEK_FOOD;
+    clearPath(animal);
+  }
+
+  function clearHungerSearch(animal) {
+    animal._hungerSearch = false;
+    animal._searchRadius = FOOD_DETECT_RANGE;
+    animal._spiralAngle = 0;
+    animal._spiralRadius = 0;
+    animal._spiralOriginX = null;
+    animal._spiralOriginY = null;
+  }
+
+  /** Max search radius that covers the full map from any point. */
+  function mapSearchCap(ctx) {
+    const mapPx = (ctx && ctx.mapPixelSize) || 12800;
+    return mapPx * 1.5;
   }
 
   function dist2(ax, ay, bx, by) {
@@ -813,6 +854,9 @@
       updatePredatorHungerGate(animal);
     }
 
+    // Hunger search at ≤50%: ignore territory, seek food map-wide
+    maybeUpdateHungerSearch(animal, dt);
+
     switch (animal.state) {
       case AI_STATE.IDLE:
         updateIdle(animal, dt, ctx);
@@ -842,32 +886,90 @@
   }
 
   /**
-   * Predators: ROAM while calories > 30%; enter SEEK_PREY at ≤30%;
-   * stay hunting until calories ≥ 80%, then return to ROAM.
+   * Predators: ROAM while calories > 50%; hunger-search at ≤50%;
+   * enter SEEK_PREY hunt at ≤30%; stay hunting until calories ≥ 80%, then ROAM.
+   * Hunger-search (not full hunt) returns to ROAM at ≥60%.
    */
   function updatePredatorHungerGate(animal) {
     const ratio = hungerRatio(animal);
     if (animal.state === AI_STATE.DEAD || animal.state === AI_STATE.FLEE || animal.state === AI_STATE.SLEEP) return;
 
-    if (animal.state === AI_STATE.SEEK_PREY || animal.state === AI_STATE.SEEK_FOOD || animal.state === AI_STATE.EATING) {
-      if (ratio >= PREDATOR_SATIATED_RATIO) {
-        animal.state = AI_STATE.ROAM;
-        animal.target = null;
-        animal._hunting = false;
-      } else if (ratio <= PREDATOR_HUNT_RATIO || animal._hunting) {
-        animal._hunting = true;
-        if (animal.state !== AI_STATE.EATING) animal.state = AI_STATE.SEEK_PREY;
+    // Full hunt mode at ≤30% — takes priority over hunger-search
+    if (ratio <= PREDATOR_HUNT_RATIO) {
+      animal._hunting = true;
+      if (animal._hungerSearch) clearHungerSearch(animal);
+      if (animal.state !== AI_STATE.EATING) {
+        animal.state = AI_STATE.SEEK_PREY;
+        if (!animal.target) animal.target = null;
       }
       return;
     }
 
-    // Roaming / idle predators
-    if (ratio <= PREDATOR_HUNT_RATIO) {
-      animal.state = AI_STATE.SEEK_PREY;
-      animal.target = null;
-      animal._hunting = true;
+    if (animal._hunting) {
+      if (ratio >= PREDATOR_SATIATED_RATIO) {
+        animal.state = AI_STATE.ROAM;
+        animal.target = null;
+        animal._hunting = false;
+        clearHungerSearch(animal);
+      } else if (animal.state !== AI_STATE.EATING) {
+        animal.state = AI_STATE.SEEK_PREY;
+      }
+      return;
+    }
+
+    // Hunger-search band (30%–50%]: seek food, return at ≥60%
+    if (animal._hungerSearch || animal.state === AI_STATE.SEEK_FOOD || animal.state === AI_STATE.EATING) {
+      if (animal._hungerSearch && ratio >= HUNGER_RETURN_RATIO && animal.state !== AI_STATE.EATING) {
+        clearHungerSearch(animal);
+        animal.state = AI_STATE.ROAM;
+        animal.target = null;
+      }
+      return;
+    }
+
+    if (ratio <= HUNGER_SEEK_RATIO) {
+      enterHungerSearch(animal);
     } else if (animal.state === AI_STATE.IDLE) {
       animal.state = AI_STATE.ROAM;
+    }
+  }
+
+  /**
+   * Shared hunger-search entry/exit for herbivores (and any non-hunt path).
+   * Predators are primarily handled by updatePredatorHungerGate.
+   */
+  function maybeUpdateHungerSearch(animal, dt) {
+    if (
+      animal.state === AI_STATE.DEAD ||
+      animal.state === AI_STATE.FLEE ||
+      animal.state === AI_STATE.SLEEP
+    ) {
+      return;
+    }
+    // Predators in hunt mode skip the shared 50% search helper
+    if (isPredator(animal) && animal.diet !== 'herbivore' && animal._hunting) {
+      return;
+    }
+    // Predators already gated above
+    if (isPredator(animal) && animal.diet !== 'herbivore') {
+      return;
+    }
+
+    const ratio = hungerRatio(animal);
+    if (ratio <= HUNGER_SEEK_RATIO) {
+      if (
+        animal.state !== AI_STATE.EATING &&
+        animal.state !== AI_STATE.SEEK_FOOD &&
+        !animal._hungerSearch
+      ) {
+        enterHungerSearch(animal);
+      } else if (animal.state === AI_STATE.SEEK_FOOD) {
+        animal._hungerSearch = true;
+      }
+    } else if (animal._hungerSearch && ratio >= HUNGER_RETURN_RATIO && animal.state !== AI_STATE.EATING) {
+      clearHungerSearch(animal);
+      animal.state = defaultRestState(animal);
+      animal.target = null;
     }
   }
 
@@ -878,6 +980,13 @@
       animal.state = AI_STATE.SEEK_PREY;
       animal.target = null;
       animal._hunting = true;
+      clearHungerSearch(animal);
+      return;
+    }
+
+    // Hunger-search at ≤50% — leave territory roaming
+    if (hungerRatio(animal) <= HUNGER_SEEK_RATIO && !animal._hunting) {
+      enterHungerSearch(animal);
       return;
     }
 
@@ -891,7 +1000,7 @@
       return;
     }
 
-    // Stay inside territory radius around spawn
+    // Stay inside territory radius around spawn (skipped while hunger-searching)
     const dx = animal.x - animal.spawnX;
     const dy = animal.y - animal.spawnY;
     const dist = Math.hypot(dx, dy);
@@ -938,14 +1047,12 @@
       }
     }
 
-    if (isHungry(animal) || hungerRatio(animal) < 0.55) {
-      animal.idleAccum = 0;
-      animal.state = AI_STATE.SEEK_FOOD;
-      animal.target = null;
+    if (isHungry(animal)) {
+      enterHungerSearch(animal);
       return;
     }
 
-    // Nap when full and idle long enough
+    // Nap when full and idle long enough (≥90% calories)
     animal.idleAccum = (animal.idleAccum || 0) + dt;
     if (
       hungerRatio(animal) >= SLEEP_ENTER_RATIO &&
@@ -1071,18 +1178,33 @@
   }
 
   function updateSeekFood(animal, dt, ctx) {
+    // Hunger-search: expand detect radius (herbivores) or spiral (predators)
+    if (animal._hungerSearch && !animal._hunting) {
+      updateHungerSearchMovement(animal, dt, ctx);
+    }
+
     // Predators seek herbivores (or corpses); herbivores seek plants; bears do both
     if (!animal.target || !isValidFoodTarget(animal, animal.target)) {
       animal.target = findFoodTarget(animal, ctx);
     }
 
     if (!animal.target) {
+      if (animal._hungerSearch && !animal._hunting) {
+        // Herbivores keep expanding; predators spiral (handled above / below)
+        if (isPredator(animal) && animal.diet !== 'herbivore') {
+          updateSpiralSearch(animal, dt, ctx);
+        } else {
+          wander(animal, dt, ctx.rng, ctx);
+        }
+        return;
+      }
       wander(animal, dt, ctx.rng, ctx);
       if (isPredator(animal) && animal._hunting) {
         // Keep hunting until satiated even if no prey nearby
         return;
       }
-      if (!isHungry(animal) && hungerRatio(animal) > 0.6) {
+      if (!isHungry(animal) && hungerRatio(animal) >= HUNGER_RETURN_RATIO) {
+        clearHungerSearch(animal);
         animal.state = defaultRestState(animal);
       }
       return;
@@ -1116,7 +1238,43 @@
       animal.packCallTimer = 1.2;
     }
 
+    // Pathfind with no max range — hunger-search may cross the whole map
     moveToward(animal, t.x, t.y, dt, 1, ctx);
+  }
+
+  /**
+   * Herbivores: grow search radius +2 tiles/sec when nothing in sight.
+   * Predators: spiral is applied when still targetless (see updateSeekFood).
+   */
+  function updateHungerSearchMovement(animal, dt, ctx) {
+    if (animal.diet === 'herbivore' || animal.diet === 'omnivore') {
+      const cap = mapSearchCap(ctx);
+      const prev = animal._searchRadius || FOOD_DETECT_RANGE;
+      // Expand by 2 tiles per second until map edge coverage
+      animal._searchRadius = Math.min(cap, prev + 2 * TILE_SIZE * dt);
+    }
+  }
+
+  /** Ever-widening spiral roam used by predators during hunger-search. */
+  function updateSpiralSearch(animal, dt, ctx) {
+    if (animal._spiralOriginX == null) {
+      animal._spiralOriginX = animal.x;
+      animal._spiralOriginY = animal.y;
+    }
+    animal._spiralAngle = (animal._spiralAngle || 0) + dt * 1.35;
+    animal._spiralRadius = (animal._spiralRadius || TILE_SIZE * 2) + TILE_SIZE * 0.85 * dt;
+    const cap = mapSearchCap(ctx);
+    if (animal._spiralRadius > cap) {
+      // Restart spiral from current position once it covers the map
+      animal._spiralRadius = TILE_SIZE * 2;
+      animal._spiralOriginX = animal.x;
+      animal._spiralOriginY = animal.y;
+    }
+    const tx =
+      animal._spiralOriginX + Math.cos(animal._spiralAngle) * animal._spiralRadius;
+    const ty =
+      animal._spiralOriginY + Math.sin(animal._spiralAngle) * animal._spiralRadius;
+    moveToward(animal, tx, ty, dt, 0.75, ctx);
   }
 
   function isValidFoodTarget(animal, t) {
@@ -1136,13 +1294,26 @@
     return false;
   }
 
+  function foodDetectRange(animal) {
+    if (animal._hungerSearch && !animal._hunting) {
+      // Herbivores: expanding radius; predators: sight only (spiral explores)
+      if (animal.diet === 'herbivore' || animal.diet === 'omnivore') {
+        return animal._searchRadius || FOOD_DETECT_RANGE;
+      }
+      return FOOD_DETECT_RANGE;
+    }
+    return FOOD_DETECT_RANGE;
+  }
+
   function findFoodTarget(animal, ctx) {
+    const detect = foodDetectRange(animal);
+
     // Prefer corpses if very hungry
     if (isPredator(animal) || isHungry(animal)) {
       const corpse = ctx.findNearestAnimal(
         animal.x,
         animal.y,
-        FOOD_DETECT_RANGE,
+        detect,
         function (o) {
           return o.state === AI_STATE.DEAD && o.corpseCalories > 0;
         }
@@ -1153,21 +1324,24 @@
     if (
       animal.diet === 'predator' ||
       animal.state === AI_STATE.SEEK_PREY ||
-      (animal.diet === 'omnivore' && (animal._hunting || hungerRatio(animal) < 0.5))
+      animal._hunting ||
+      (animal.diet === 'omnivore' && (animal._hunting || animal._hungerSearch || isHungry(animal))) ||
+      (animal._hungerSearch && isPredator(animal))
     ) {
-      // Lion females do most hunting (males only when hungrier), unless already in hunt mode
+      // Lion females do most hunting (males only when hungrier), unless already in hunt/search
       if (
         animal.special === 'female_hunt' &&
         animal.sex === 'male' &&
         hungerRatio(animal) > 0.25 &&
-        !animal._hunting
+        !animal._hunting &&
+        !animal._hungerSearch
       ) {
         // Males hunt only when hungrier
       } else {
       const prey = ctx.findNearestAnimal(
         animal.x,
         animal.y,
-        FOOD_DETECT_RANGE,
+        detect,
         function (o) {
           return o.alive && o.diet === 'herbivore' && o.id !== animal.id;
         }
@@ -1179,7 +1353,7 @@
         const rival = ctx.findNearestAnimal(
           animal.x,
           animal.y,
-          FOOD_DETECT_RANGE * 0.45,
+          detect * 0.45,
           function (o) {
             return o.alive && isPredator(o) && o.id !== animal.id;
           }
@@ -1195,7 +1369,7 @@
         const victim = ctx.findNearestAnimal(
           animal.x,
           animal.y,
-          FOOD_DETECT_RANGE * 0.5,
+          detect * 0.5,
           function (o) {
             return o.alive && o.id !== animal.id && o.calories > 10;
           }
@@ -1206,7 +1380,7 @@
       const plant = ctx.findNearestPlant(
         animal.x,
         animal.y,
-        FOOD_DETECT_RANGE,
+        detect,
         function (p) {
           return p.alive && p.calories > 0;
         }
@@ -1287,11 +1461,27 @@
       clearPath(animal);
       if (isPredator(animal) && animal._hunting && hungerRatio(animal) < PREDATOR_SATIATED_RATIO) {
         animal.state = AI_STATE.SEEK_PREY;
-      } else if (isHungry(animal)) {
-        animal.state = AI_STATE.SEEK_FOOD;
+      } else if (isHungry(animal) || animal._hungerSearch) {
+        if (!animal._hungerSearch) enterHungerSearch(animal);
+        else animal.state = AI_STATE.SEEK_FOOD;
       } else {
+        clearHungerSearch(animal);
         animal.state = defaultRestState(animal);
       }
+      return;
+    }
+
+    // Hunger-search satiation: resume normal behavior once ≥60%
+    if (
+      animal._hungerSearch &&
+      !animal._hunting &&
+      hungerRatio(animal) >= HUNGER_RETURN_RATIO
+    ) {
+      animal.target = null;
+      animal._eatBobTimer = 0;
+      clearPath(animal);
+      clearHungerSearch(animal);
+      animal.state = defaultRestState(animal);
       return;
     }
 
@@ -1582,12 +1772,29 @@
   /** After eating: predators keep hunting until 80%, else roam/idle. */
   function postEatState(animal) {
     if (isPredator(animal) && animal.diet !== 'herbivore') {
-      if (hungerRatio(animal) >= PREDATOR_SATIATED_RATIO) {
-        animal._hunting = false;
-        return AI_STATE.ROAM;
+      if (animal._hunting) {
+        if (hungerRatio(animal) >= PREDATOR_SATIATED_RATIO) {
+          animal._hunting = false;
+          clearHungerSearch(animal);
+          return AI_STATE.ROAM;
+        }
+        return AI_STATE.SEEK_PREY;
       }
-      animal._hunting = true;
-      return AI_STATE.SEEK_PREY;
+      if (animal._hungerSearch) {
+        if (hungerRatio(animal) >= HUNGER_RETURN_RATIO) {
+          clearHungerSearch(animal);
+          return AI_STATE.ROAM;
+        }
+        return AI_STATE.SEEK_FOOD;
+      }
+      return AI_STATE.ROAM;
+    }
+    if (animal._hungerSearch) {
+      if (hungerRatio(animal) >= HUNGER_RETURN_RATIO) {
+        clearHungerSearch(animal);
+        return AI_STATE.IDLE;
+      }
+      return AI_STATE.SEEK_FOOD;
     }
     return AI_STATE.IDLE;
   }
@@ -1621,6 +1828,8 @@
     ADULT_AGE,
     BREED_COOLDOWN,
     BREED_CALORIE_RATIO,
+    HUNGER_SEEK_RATIO,
+    HUNGER_RETURN_RATIO,
     DAY_TICKS,
     CALORIE_BURN_DIVISOR,
     MIN_CALORIE_BURN,
@@ -1646,6 +1855,7 @@
     SLEEP_IDLE_SECONDS,
     SLEEP_MIN_SECONDS,
     SLEEP_MAX_SECONDS,
+    SLEEP_WAKE_PREDATOR_RANGE,
     createAnimal,
     updateAnimal,
     tickAnimal,

@@ -264,6 +264,8 @@ function assert(cond, msg) {
 
 // --- Unit: sleep enter / wake ---
 {
+  assert(Wildborn.animal.SLEEP_ENTER_RATIO === 0.9, 'sleep enter threshold is 90%');
+
   const deer = Wildborn.animal.createAnimal('deer', 0, 0);
   deer.calories = deer.maxCalories;
   deer.state = 'IDLE';
@@ -283,6 +285,46 @@ function assert(cond, msg) {
   deer.calories = deer.maxCalories * 0.65;
   Wildborn.animal.updateAnimal(deer, 0.1, ctx);
   assert(deer.state === 'IDLE', 'wakes when calories drop below 70%');
+
+  // Below 90% should not nap even after long idle
+  deer.state = 'IDLE';
+  deer.calories = deer.maxCalories * 0.85;
+  deer.idleAccum = 5;
+  Wildborn.animal.updateAnimal(deer, 0.1, ctx);
+  assert(deer.state !== 'SLEEP', 'does not enter SLEEP below 90% calories');
+}
+
+// --- Unit: hunger search at ≤50% ---
+{
+  assert(Wildborn.animal.HUNGER_SEEK_RATIO === 0.5, 'hunger search trigger is 50%');
+  assert(Wildborn.animal.HUNGER_RETURN_RATIO === 0.6, 'hunger search returns at 60%');
+
+  const rabbit = Wildborn.animal.createAnimal('rabbit', 0, 0);
+  rabbit.calories = rabbit.maxCalories * 0.5;
+  rabbit.state = 'IDLE';
+  const ctx = {
+    rng: createRng('hunger-search'),
+    tickSeconds: 0.5,
+    isWater: () => false,
+    mapPixelSize: 12800,
+    findNearestPlant: () => null,
+    findNearestAnimal: () => null,
+    queryAnimals: () => [],
+  };
+  Wildborn.animal.updateAnimal(rabbit, 0.1, ctx);
+  assert(
+    rabbit.state === 'SEEK_FOOD' && rabbit._hungerSearch,
+    'herbivore enters SEEK_FOOD hunger-search at ≤50%'
+  );
+
+  const wolfSearch = Wildborn.animal.createAnimal('wolf', 100, 100);
+  wolfSearch.calories = wolfSearch.maxCalories * 0.45;
+  wolfSearch.state = 'ROAM';
+  Wildborn.animal.updateAnimal(wolfSearch, 0.1, ctx);
+  assert(
+    wolfSearch.state === 'SEEK_FOOD' && wolfSearch._hungerSearch && !wolfSearch._hunting,
+    'predator hunger-searches at ≤50% before hunt mode'
+  );
 }
 
 // --- Unit: predator hunt threshold / satiation ---

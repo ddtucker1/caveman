@@ -54,6 +54,8 @@
     mouseX: 0,
     mouseY: 0,
     hoverEntity: null,
+    /** Entity currently shown in the inspector popup (follows entity). */
+    inspectEntity: null,
     time: 0,
   };
 
@@ -207,6 +209,220 @@
   })();
 
   // ---------------------------------------------------------------------------
+  // Entity Inspector popup (click plant/animal)
+  // ---------------------------------------------------------------------------
+
+  const inspectorWindow = document.getElementById('inspector-window');
+  const inspectorTitlebar = document.getElementById('inspector-titlebar');
+  const inspectorTitle = document.getElementById('inspector-title');
+  const inspectorBody = document.getElementById('inspector-body');
+  const inspectorClose = document.getElementById('inspector-close');
+
+  function inspRow(label, value) {
+    return (
+      '<div class="insp-row">' +
+      '<span class="insp-label">' + label + '</span>' +
+      '<span class="insp-value">' + value + '</span>' +
+      '</div>'
+    );
+  }
+
+  function inspectorTypeClass(entity) {
+    if (!entity) return 'plant';
+    if (entity.kind === 'plant') return 'plant';
+    if (entity.diet === 'predator' || entity.diet === 'omnivore') return 'predator';
+    return 'herbivore';
+  }
+
+  function countAnimalsEatingPlant(plant, ecosystem) {
+    if (!ecosystem || !plant) return 0;
+    let n = 0;
+    const animals = ecosystem.animals;
+    for (let i = 0; i < animals.length; i++) {
+      const a = animals[i];
+      if (
+        a.alive &&
+        a.state === 'EATING' &&
+        a.target &&
+        a.target.kind === 'plant' &&
+        a.target.id === plant.id
+      ) {
+        n++;
+      }
+    }
+    return n;
+  }
+
+  function formatInspectAge(entity) {
+    if (entity.kind === 'plant') return '—';
+    if (!entity.isAdult) return 'Baby';
+    const elderAge = (Wildborn.animal && Wildborn.animal.ADULT_AGE) || 80;
+    if (entity.age > elderAge + 80) return 'Elder';
+    return 'Adult';
+  }
+
+  function formatInspectState(entity) {
+    if (entity.kind === 'plant') {
+      if (!entity.alive) {
+        const tickSec =
+          (game.ecosystem && game.ecosystem.tickSeconds) ||
+          config.ecosystemTickSeconds ||
+          0.5;
+        const secs = Math.max(0, Math.ceil((entity.respawnTimer || 0) * tickSec));
+        return 'Depleted (respawning in ' + secs + 's)';
+      }
+      if (countAnimalsEatingPlant(entity, game.ecosystem) > 0) return 'Being Eaten';
+      return 'Growing';
+    }
+    const s = entity.state;
+    if (s === 'DEAD') return 'Dead';
+    if (s === 'SLEEP') return 'Sleeping';
+    if (s === 'EATING') return 'Eating';
+    if (s === 'FLEE') return 'Fleeing';
+    if (s === 'SEEK_PREY' || entity._hunting) return 'Hunting';
+    if (s === 'SEEK_FOOD' || entity._hungerSearch) return 'Searching for Food';
+    if (s === 'ROAM') return 'Roaming';
+    if (s === 'IDLE') return 'Idle';
+    return s || 'Idle';
+  }
+
+  function buildInspectorHtml(entity) {
+    if (!entity) return '';
+    const def = Wildborn.shapes.getSpeciesDef(entity.species);
+    const name = (def && def.label) || entity.label || entity.species;
+    const tickSec =
+      (game.ecosystem && game.ecosystem.tickSeconds) ||
+      config.ecosystemTickSeconds ||
+      0.5;
+    let html = '';
+
+    if (entity.kind === 'plant') {
+      const growthPerSec = (entity.growthPerTick || 0) / tickSec;
+      const eaters = countAnimalsEatingPlant(entity, game.ecosystem);
+      html += inspRow('Calories', Math.round(entity.calories) + ' / ' + Math.round(entity.maxCalories));
+      html += inspRow('Growth rate', growthPerSec.toFixed(1) + ' cal/s');
+      html += inspRow('Status', formatInspectState(entity));
+      html += inspRow('Animals eating', String(eaters));
+      return { name: name, html: html };
+    }
+
+    const burnPerTick =
+      Wildborn.animal && typeof Wildborn.animal.calorieBurnPerTick === 'function'
+        ? Wildborn.animal.calorieBurnPerTick(entity)
+        : 0;
+    const burnPerSec = burnPerTick / tickSec;
+    const stam = Math.round(entity.stamina != null ? entity.stamina : 100);
+    const maxStam = Math.round(entity.maxStamina != null ? entity.maxStamina : 100);
+    const cooldownTicks = entity.breedingCooldown || 0;
+    const cooldownSec = Math.ceil(cooldownTicks * tickSec);
+    const repro =
+      entity.isAdult && cooldownTicks <= 0
+        ? 'ready'
+        : !entity.isAdult
+          ? '—'
+          : cooldownSec + 's remaining';
+    const curSpeed = Math.hypot(entity.vx || 0, entity.vy || 0);
+    const maxSpeed = entity.baseSpeed != null ? entity.baseSpeed : 0;
+
+    html += inspRow('Calories', Math.round(entity.calories) + ' / ' + Math.round(entity.maxCalories));
+    html += inspRow('Burn rate', burnPerSec.toFixed(2) + ' cal/s');
+    html += inspRow('State', formatInspectState(entity));
+    html += inspRow('Stamina', stam + ' / ' + maxStam);
+    html += inspRow('Reproduction', repro);
+    html += inspRow('Age', formatInspectAge(entity));
+    html += inspRow('Speed', curSpeed.toFixed(1) + ' / ' + maxSpeed.toFixed(1));
+
+    if (entity.diet === 'predator' || entity.diet === 'omnivore') {
+      html += inspRow('Hunt threshold', '30%');
+      let targetName = '—';
+      if (
+        (entity._hunting || entity.state === 'SEEK_PREY' || entity.state === 'SEEK_FOOD') &&
+        entity.target &&
+        entity.target.kind === 'animal'
+      ) {
+        const tDef = Wildborn.shapes.getSpeciesDef(entity.target.species);
+        targetName =
+          (tDef && tDef.label) ||
+          entity.target.label ||
+          entity.target.species ||
+          '—';
+      }
+      html += inspRow('Hunt target', targetName);
+    }
+
+    return { name: name, html: html };
+  }
+
+  function closeInspector() {
+    game.inspectEntity = null;
+    if (inspectorWindow) inspectorWindow.classList.add('hidden');
+  }
+
+  function openInspector(entity) {
+    if (!entity || !inspectorWindow) {
+      closeInspector();
+      return;
+    }
+    game.inspectEntity = entity;
+    inspectorWindow.classList.remove('hidden');
+    refreshInspector();
+    positionInspector();
+  }
+
+  function refreshInspector() {
+    if (!game.inspectEntity || !inspectorBody || !inspectorTitle) return;
+    const entity = game.inspectEntity;
+    // Drop inspector if entity was removed
+    if (entity.kind === 'animal' && game.ecosystem) {
+      const stillThere = game.ecosystem.animals.indexOf(entity) >= 0;
+      if (!stillThere) {
+        closeInspector();
+        return;
+      }
+    }
+    const built = buildInspectorHtml(entity);
+    inspectorTitle.textContent = built.name;
+    if (inspectorTitlebar) {
+      inspectorTitlebar.classList.remove('plant', 'herbivore', 'predator');
+      inspectorTitlebar.classList.add(inspectorTypeClass(entity));
+    }
+    inspectorBody.innerHTML = built.html;
+  }
+
+  function positionInspector() {
+    if (!game.inspectEntity || !inspectorWindow || !game.camera) return;
+    const entity = game.inspectEntity;
+    const screen = Wildborn.camera.worldToScreen(game.camera, entity.x, entity.y);
+    const pad = 12;
+    const boxW = inspectorWindow.offsetWidth || 260;
+    const boxH = inspectorWindow.offsetHeight || 180;
+    let x = screen.x + 18;
+    let y = screen.y - boxH * 0.35;
+    if (x + boxW > window.innerWidth - pad) x = screen.x - boxW - 18;
+    if (y < pad) y = pad;
+    if (y + boxH > window.innerHeight - pad) y = window.innerHeight - boxH - pad;
+    if (x < pad) x = pad;
+    inspectorWindow.style.left = Math.round(x) + 'px';
+    inspectorWindow.style.top = Math.round(y) + 'px';
+  }
+
+  if (inspectorClose) {
+    inspectorClose.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      closeInspector();
+    });
+  }
+  if (inspectorWindow) {
+    inspectorWindow.addEventListener('mousedown', function (e) {
+      e.stopPropagation();
+    });
+    inspectorWindow.addEventListener('click', function (e) {
+      e.stopPropagation();
+    });
+  }
+
+  // ---------------------------------------------------------------------------
   // Canvas sizing (CSS pixels via setTransform)
   // ---------------------------------------------------------------------------
 
@@ -266,6 +482,13 @@
     if (e.code === 'Tab' && state === 'playing') {
       toggleCensus();
       e.preventDefault();
+      return;
+    }
+
+    // ESC — close entity inspector
+    if (e.code === 'Escape' && state === 'playing' && game.inspectEntity) {
+      closeInspector();
+      e.preventDefault();
     }
   });
 
@@ -281,6 +504,19 @@
     const rect = canvas.getBoundingClientRect();
     game.mouseX = e.clientX - rect.left;
     game.mouseY = e.clientY - rect.top;
+  });
+
+  canvas.addEventListener('click', function (e) {
+    if (state !== 'playing' || !game.ecosystem || !config.ecosystemEnabled) return;
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const hit = pickEntityAt(game.ecosystem, game.camera, mx, my);
+    if (hit) {
+      openInspector(hit);
+    } else {
+      closeInspector();
+    }
   });
 
   // ---------------------------------------------------------------------------
@@ -347,6 +583,7 @@
     if (btnCensus) btnCensus.classList.remove('hidden');
     resetCensusPosition();
     setCensusVisible(!!config.showCensus);
+    closeInspector();
 
     menuEl.classList.add('hidden');
     state = 'playing';
@@ -387,6 +624,11 @@
         game.censusRefreshAccum = 0;
         refreshCensus();
       }
+    }
+
+    if (game.inspectEntity) {
+      refreshInspector();
+      positionInspector();
     }
 
     updateHud(game.player);

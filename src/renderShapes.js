@@ -18,13 +18,21 @@
    */
   function renderShape(ctx, entityType, x, y, scale, facingRight, opts) {
     opts = opts || {};
-    const def = Wildborn.shapes.getSpeciesDef(entityType);
+    let def = Wildborn.shapes.getSpeciesDef(entityType);
     if (!def) {
       // Fallback square so missing defs stay visible
       const s = 8 * (scale || 1);
       ctx.fillStyle = '#888';
       ctx.fillRect(x - s / 2, y - s / 2, s, s);
       return;
+    }
+
+    // Hunger-search: eye dots turn orange
+    if (opts.hungrySearch && def.category !== 'plant') {
+      def = Object.assign({}, def, {
+        eyeColor: '#ff8c00',
+        eyeGlowColor: '#ff8c00',
+      });
     }
 
     const sz = (def.size || 10) * (scale || 1);
