@@ -1,11 +1,18 @@
 /**
- * Draw helpers: tiles, player, UI bars.
- * Phase 1 — simple colored shapes only.
+ * Draw helpers: tiles, player, ecosystem sprites, UI overlays.
+ * Entity silhouettes come from Wildborn.renderShapes.renderShape().
  */
 (function (global) {
   const Wildborn = (global.Wildborn = global.Wildborn || {});
   const { TILE, TILE_SIZE, TILE_COLORS } = Wildborn.world;
   const { worldToScreen } = Wildborn.camera;
+
+  /** Deterministic 0–1 hash for stable terrain decoration. */
+  function hash2(x, y) {
+    let n = ((x * 374761393) ^ (y * 668265263)) | 0;
+    n = (n ^ (n >>> 13)) * 1274126177;
+    return ((n ^ (n >>> 16)) >>> 0) / 4294967296;
+  }
 
   function clear(ctx, w, h) {
     ctx.fillStyle = '#1a2214';
@@ -13,11 +20,13 @@
   }
 
   /** Draw all tiles currently visible through the camera. */
-  function drawWorld(ctx, world, camera) {
+  function drawWorld(ctx, world, camera, time) {
+    time = time || 0;
     const tx0 = Math.floor(camera.x / TILE_SIZE);
     const ty0 = Math.floor(camera.y / TILE_SIZE);
     const tx1 = Math.ceil((camera.x + camera.width) / TILE_SIZE);
     const ty1 = Math.ceil((camera.y + camera.height) / TILE_SIZE);
+    const terrain = Wildborn.shapes.getShapeDefs().shared.terrain;
 
     for (let ty = ty0; ty <= ty1; ty++) {
       for (let tx = tx0; tx <= tx1; tx++) {
@@ -25,40 +34,116 @@
         const wx = tx * TILE_SIZE;
         const wy = ty * TILE_SIZE;
         const screen = worldToScreen(camera, wx, wy);
-        drawTile(ctx, tile, screen.x, screen.y);
+        drawTile(ctx, tile, screen.x, screen.y, tx, ty, time, terrain);
       }
     }
   }
 
-  function drawTile(ctx, tile, sx, sy) {
-    ctx.fillStyle = TILE_COLORS[tile] != null ? TILE_COLORS[tile] : '#888';
-    ctx.fillRect(sx, sy, TILE_SIZE, TILE_SIZE);
+  function drawTile(ctx, tile, sx, sy, tx, ty, time, terrain) {
+    // Base fill — grass uses light tan under-tint for texture readability
+    if (tile === TILE.GRASS || tile === TILE.DENSE_GRASS) {
+      ctx.fillStyle = terrain.grassBase;
+      ctx.fillRect(sx, sy, TILE_SIZE, TILE_SIZE);
+      ctx.fillStyle =
+        tile === TILE.DENSE_GRASS
+          ? 'rgba(61,106,44,0.82)'
+          : 'rgba(74,122,52,0.78)';
+      ctx.fillRect(sx, sy, TILE_SIZE, TILE_SIZE);
+      // Speckles
+      ctx.fillStyle = terrain.speckleColor;
+      const n = 5 + ((tx * 3 + ty) % 3);
+      for (let i = 0; i < n; i++) {
+        const h = hash2(tx * 17 + i, ty * 13 + i);
+        const px = sx + (h * 27) % (TILE_SIZE - 2);
+        const py = sy + (hash2(ty + i, tx + i) * 27) % (TILE_SIZE - 2);
+        ctx.fillRect(px, py, 1.5, 1.5);
+      }
+      // Decorative grass tufts (non-interactive)
+      if (hash2(tx, ty) > 0.72) {
+        ctx.strokeStyle = terrain.tuftColor;
+        ctx.lineWidth = 1.2;
+        const bx = sx + 8 + hash2(tx + 1, ty) * 14;
+        const by = sy + 22;
+        for (let i = 0; i < 3; i++) {
+          ctx.beginPath();
+          ctx.moveTo(bx + i * 3, by);
+          ctx.lineTo(bx + i * 3 + (i - 1), by - 6 - i);
+          ctx.stroke();
+        }
+      }
+      // Scattered rock formations
+      if (hash2(tx + 9, ty + 4) > 0.93) {
+        drawRock(ctx, sx + 10, sy + 12, terrain, hash2(tx, ty + 3));
+      }
+    } else {
+      ctx.fillStyle = TILE_COLORS[tile] != null ? TILE_COLORS[tile] : '#888';
+      ctx.fillRect(sx, sy, TILE_SIZE, TILE_SIZE);
+    }
 
     if (tile === TILE.TREE) {
       ctx.fillStyle = '#3a5a28';
-      ctx.fillRect(sx + 4, sy + 4, TILE_SIZE - 8, TILE_SIZE - 8);
+      ctx.beginPath();
+      ctx.arc(sx + TILE_SIZE / 2, sy + 12, 10, 0, Math.PI * 2);
+      ctx.fill();
       ctx.fillStyle = '#5a3a1a';
       ctx.fillRect(sx + TILE_SIZE / 2 - 3, sy + TILE_SIZE - 10, 6, 8);
     } else if (tile === TILE.PLANT) {
-      ctx.fillStyle = '#8fd050';
-      ctx.fillRect(sx + 10, sy + 8, 4, 16);
-      ctx.fillRect(sx + 16, sy + 12, 4, 12);
-      ctx.fillRect(sx + 6, sy + 14, 4, 10);
+      ctx.strokeStyle = '#8fd050';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(sx + 12, sy + 24);
+      ctx.lineTo(sx + 11, sy + 12);
+      ctx.moveTo(sx + 16, sy + 24);
+      ctx.lineTo(sx + 18, sy + 14);
+      ctx.moveTo(sx + 20, sy + 24);
+      ctx.lineTo(sx + 21, sy + 16);
+      ctx.stroke();
     } else if (tile === TILE.WATER) {
-      ctx.fillStyle = 'rgba(180, 220, 255, 0.15)';
-      ctx.fillRect(sx + 4, sy + 10, TILE_SIZE - 8, 4);
-      ctx.fillRect(sx + 8, sy + 18, TILE_SIZE - 16, 3);
+      // Animated wave frames (slow 2–3 frame cycle)
+      const frame = Math.floor((time * 1.2) % 3);
+      ctx.fillStyle = terrain.waterHighlight;
+      const yOff = frame * 3;
+      ctx.fillRect(sx + 4, sy + 8 + yOff, TILE_SIZE - 8, 3);
+      ctx.fillRect(sx + 8, sy + 16 + ((frame + 1) % 3) * 2, TILE_SIZE - 14, 2);
+      ctx.fillRect(sx + 6, sy + 22 + ((frame + 2) % 3), TILE_SIZE - 12, 2);
     } else if (tile === TILE.CLIFF) {
       ctx.fillStyle = '#8a8a80';
       ctx.fillRect(sx + 2, sy + 2, TILE_SIZE - 4, 4);
       ctx.fillStyle = '#4a4a44';
       ctx.fillRect(sx + 2, sy + TILE_SIZE - 6, TILE_SIZE - 4, 4);
-    } else if (tile === TILE.GRASS || tile === TILE.DENSE_GRASS) {
-      ctx.fillStyle = tile === TILE.DENSE_GRASS ? '#2e5520' : '#3a6528';
-      ctx.fillRect(sx + 6, sy + 18, 2, 6);
-      ctx.fillRect(sx + 14, sy + 14, 2, 8);
-      ctx.fillRect(sx + 22, sy + 16, 2, 7);
+      // Rock-like facets
+      ctx.fillStyle = 'rgba(0,0,0,0.15)';
+      ctx.beginPath();
+      ctx.moveTo(sx + 4, sy + 10);
+      ctx.lineTo(sx + 14, sy + 8);
+      ctx.lineTo(sx + 18, sy + 20);
+      ctx.lineTo(sx + 6, sy + 22);
+      ctx.fill();
+    } else if (tile === TILE.SAND) {
+      ctx.fillStyle = 'rgba(90,70,40,0.12)';
+      for (let i = 0; i < 4; i++) {
+        const h = hash2(tx + i * 3, ty + i);
+        ctx.fillRect(sx + h * 28, sy + hash2(ty, tx + i) * 28, 1.5, 1.5);
+      }
     }
+  }
+
+  function drawRock(ctx, x, y, terrain, seed) {
+    ctx.fillStyle = terrain.rockColor;
+    ctx.beginPath();
+    ctx.moveTo(x, y + 6);
+    ctx.lineTo(x + 3 + seed * 4, y);
+    ctx.lineTo(x + 10 + seed * 3, y + 2);
+    ctx.lineTo(x + 12, y + 8);
+    ctx.lineTo(x + 4, y + 10);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = terrain.rockShade;
+    ctx.beginPath();
+    ctx.moveTo(x + 4, y + 10);
+    ctx.lineTo(x + 12, y + 8);
+    ctx.lineTo(x + 8, y + 10);
+    ctx.fill();
   }
 
   /** Draw the player as a caveman-colored square with a stick. */
@@ -66,6 +151,12 @@
     const screen = worldToScreen(camera, player.x, player.y);
     const sx = screen.x;
     const sy = screen.y;
+
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.12)';
+    ctx.beginPath();
+    ctx.ellipse(sx + player.w / 2, sy + player.h - 2, player.w * 0.4, 3, 0, 0, Math.PI * 2);
+    ctx.fill();
 
     ctx.fillStyle = '#c4a06a';
     ctx.fillRect(sx, sy, player.w, player.h);
@@ -117,11 +208,19 @@
   // Ecosystem rendering
   // ---------------------------------------------------------------------------
 
-  /** Draw plants, animals, eggs visible through the camera. */
-  function drawEcosystem(ctx, ecosystem, camera) {
+  /**
+   * @param {CanvasRenderingContext2D} ctx
+   * @param {object} ecosystem
+   * @param {object} camera
+   * @param {object} [view] { time, hoverWorld, showDebug, showHuntLines }
+   */
+  function drawEcosystem(ctx, ecosystem, camera, view) {
     if (!ecosystem) return;
+    view = view || {};
+    const time = view.time || 0;
+    const showHuntLines = !!(view.showHuntLines || view.showDebug);
 
-    const pad = 32;
+    const pad = 48;
     const x0 = camera.x - pad;
     const y0 = camera.y - pad;
     const x1 = camera.x + camera.width + pad;
@@ -132,7 +231,7 @@
       const p = plants[i];
       if (!p.alive) continue;
       if (p.x < x0 || p.x > x1 || p.y < y0 || p.y > y1) continue;
-      drawPlantSprite(ctx, p, camera);
+      drawPlantSprite(ctx, p, camera, time);
     }
 
     const eggs = ecosystem.eggs;
@@ -140,6 +239,10 @@
       const e = eggs[i];
       if (e.x < x0 || e.x > x1 || e.y < y0 || e.y > y1) continue;
       const s = worldToScreen(camera, e.x, e.y);
+      ctx.fillStyle = 'rgba(0,0,0,0.1)';
+      ctx.beginPath();
+      ctx.ellipse(s.x, s.y + 3, 4, 2, 0, 0, Math.PI * 2);
+      ctx.fill();
       ctx.fillStyle = e.color || '#f5f0e0';
       ctx.beginPath();
       ctx.ellipse(s.x, s.y, e.size || 4, (e.size || 4) * 1.2, 0, 0, Math.PI * 2);
@@ -147,6 +250,27 @@
     }
 
     const animals = ecosystem.animals;
+    // Pass 1: hunt lines under sprites (hover/debug only)
+    if (showHuntLines || view.hoverEntity) {
+      for (let i = 0; i < animals.length; i++) {
+        const a = animals[i];
+        if (!a.alive || a.state === 'DEAD') continue;
+        if (a.x < x0 || a.x > x1 || a.y < y0 || a.y > y1) continue;
+        const hunting =
+          (a.diet === 'predator' || a.diet === 'omnivore') &&
+          a.state === 'SEEK_FOOD' &&
+          a.target &&
+          a.target.kind === 'animal' &&
+          a.target.alive;
+        const showLine =
+          hunting &&
+          (showHuntLines || (view.hoverEntity && view.hoverEntity.id === a.id));
+        if (showLine) {
+          drawHuntLine(ctx, a, a.target, camera);
+        }
+      }
+    }
+
     for (let i = 0; i < animals.length; i++) {
       const a = animals[i];
       if (a.x < x0 || a.x > x1 || a.y < y0 || a.y > y1) continue;
@@ -159,83 +283,392 @@
         const reveal = a.stealthRevealDist || 120;
         if (dx * dx + dy * dy > reveal * reveal) continue;
       }
-      drawAnimalSprite(ctx, a, camera);
+      drawAnimalSprite(ctx, a, camera, time, ecosystem);
     }
   }
 
-  function drawPlantSprite(ctx, plant, camera) {
+  function drawHuntLine(ctx, predator, target, camera) {
+    const a = worldToScreen(camera, predator.x, predator.y);
+    const b = worldToScreen(camera, target.x, target.y);
+    ctx.save();
+    ctx.strokeStyle = 'rgba(200,40,40,0.55)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
+  /** Visual multiplier — sprites draw larger than hitboxes for readability. */
+  const ENTITY_VISUAL_SCALE = 1.55;
+
+  function drawPlantSprite(ctx, plant, camera, time) {
     const s = worldToScreen(camera, plant.x, plant.y);
-    const sz = plant.size;
-    const calRatio = plant.calories / plant.maxCalories;
+    const shapeDef = Wildborn.shapes.getSpeciesDef(plant.species);
+    const base = shapeDef ? shapeDef.size : plant.size;
+    const scale = (plant.size / base) * ENTITY_VISUAL_SCALE;
 
-    ctx.globalAlpha = 0.55 + 0.45 * calRatio;
-    ctx.fillStyle = plant.color;
-    ctx.fillRect(s.x - sz / 2, s.y - sz / 2, sz, sz);
-
-    // Species accent (berries / fruit / mushroom cap)
-    if (plant.species === 'berry_bush' || plant.species === 'fruit_tree') {
-      ctx.fillStyle = plant.accent;
-      ctx.fillRect(s.x - 2, s.y - sz / 2 - 2, 3, 3);
-      ctx.fillRect(s.x + 1, s.y - 2, 3, 3);
-    } else if (plant.species === 'mushroom') {
-      ctx.fillStyle = plant.accent;
-      ctx.beginPath();
-      ctx.arc(s.x, s.y - 2, sz * 0.4, Math.PI, 0);
-      ctx.fill();
-    } else if (plant.species === 'cactus') {
-      ctx.fillStyle = plant.accent;
-      ctx.fillRect(s.x - 1, s.y - sz / 2 - 3, 2, 4);
-    }
-    ctx.globalAlpha = 1;
+    Wildborn.renderShapes.renderShape(
+      ctx,
+      plant.species,
+      s.x,
+      s.y,
+      scale,
+      true,
+      {
+        time: time,
+        state: 'IDLE',
+        calories: plant.calories,
+        maxCalories: plant.maxCalories,
+        id: plant.id,
+      }
+    );
   }
 
-  function drawAnimalSprite(ctx, animal, camera) {
+  function drawAnimalSprite(ctx, animal, camera, time, ecosystem) {
     const s = worldToScreen(camera, animal.x, animal.y);
-    const sz = animal.size;
-
-    if (animal.state === 'DEAD') {
-      ctx.globalAlpha = 0.55;
-      ctx.fillStyle = '#5a4038';
-      ctx.fillRect(s.x - sz / 2, s.y - sz / 3, sz, sz * 0.55);
-      ctx.globalAlpha = 1;
-      return;
-    }
+    const shapeDef = Wildborn.shapes.getSpeciesDef(animal.species);
+    const base = shapeDef ? shapeDef.size : animal.baseSize || animal.size;
+    const scale = (animal.size / base) * ENTITY_VISUAL_SCALE;
 
     if (animal.burrowed) {
       ctx.fillStyle = 'rgba(80,60,40,0.5)';
       ctx.beginPath();
-      ctx.ellipse(s.x, s.y, sz * 0.6, sz * 0.3, 0, 0, Math.PI * 2);
+      ctx.ellipse(s.x, s.y, animal.size * 0.6, animal.size * 0.3, 0, 0, Math.PI * 2);
       ctx.fill();
       return;
     }
 
-    ctx.fillStyle = animal.color;
-    ctx.fillRect(s.x - sz / 2, s.y - sz / 2, sz, sz);
+    const facingRight = animal.vx >= 0;
+    // Persist facing when stopped
+    if (Math.abs(animal.vx) < 2 && animal._facingRight != null) {
+      // keep last
+    } else {
+      animal._facingRight = facingRight;
+    }
+    const face = animal._facingRight !== false;
 
-    if (animal.accent) {
-      ctx.fillStyle = animal.accent;
-      ctx.fillRect(s.x - sz / 2, s.y - sz / 2, sz, 3);
+    const speed = Math.hypot(animal.vx || 0, animal.vy || 0);
+    const moving = speed > 8;
+    const hunting =
+      animal.alive &&
+      (animal.diet === 'predator' || animal.diet === 'omnivore') &&
+      animal.state === 'SEEK_FOOD' &&
+      animal.target &&
+      animal.target.kind === 'animal' &&
+      animal.target.alive;
+    const stalking = hunting && animal.special === 'stealth';
+    const fleeing = animal.state === 'FLEE' && !animal._counterAttack;
+    const attacking =
+      (animal.state === 'FLEE' && animal._counterAttack) ||
+      (hunting && animal.attackCooldown > 0);
+    const roaring = animal.packCallTimer > 0 && animal.special === 'howl';
+    // Lion roar when calling pack (also female_hunt pack feel via packCallTimer)
+    const lionRoar =
+      animal.species === 'lion' && (animal.packCallTimer > 0 || animal._howlPulse);
+    const rearUp =
+      animal.species === 'bear' &&
+      hunting &&
+      animal.stateTimer != null &&
+      animal.state === 'SEEK_FOOD' &&
+      (Math.floor(time * 2) % 5 === 0);
+    const sleeping =
+      animal.alive &&
+      (animal.diet === 'predator' || animal.diet === 'omnivore') &&
+      animal.state === 'IDLE' &&
+      !moving &&
+      animal.calories > animal.maxCalories * 0.7;
+
+    // Eye look toward nearest threat (herbivore) or food/prey
+    let lookX = face ? 0.5 : -0.5;
+    let lookY = 0;
+    const focus = animal.fleeFrom || animal.target;
+    if (focus && focus.x != null) {
+      const dx = focus.x - animal.x;
+      const dy = focus.y - animal.y;
+      const len = Math.hypot(dx, dy) || 1;
+      // Convert to local facing space (renderShape flips for left)
+      lookX = (face ? dx : -dx) / len;
+      lookY = dy / len;
     }
 
-    // Juvenile indicator
-    if (!animal.isAdult) {
-      ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+    let deadAge = 0;
+    if (animal.state === 'DEAD') {
+      if (animal.deadAt == null) animal.deadAt = time;
+      deadAge = Math.max(0, time - animal.deadAt);
+    }
+
+    Wildborn.renderShapes.renderShape(
+      ctx,
+      animal.species,
+      s.x,
+      s.y,
+      scale,
+      face,
+      {
+        time: time,
+        state: animal.state,
+        calories: animal.calories,
+        maxCalories: animal.maxCalories,
+        id: animal.id,
+        sex: animal.sex,
+        isAdult: animal.isAdult,
+        moving: moving,
+        speed: speed,
+        hunting: hunting,
+        stalking: stalking,
+        fleeing: fleeing,
+        attacking: attacking,
+        eating: animal.state === 'EATING',
+        roaring: roaring || lionRoar,
+        rearUp: rearUp,
+        sleeping: sleeping,
+        inWater: !!animal._inWater,
+        counterAttack: !!animal._counterAttack,
+        lookX: lookX,
+        lookY: lookY,
+        deadAge: deadAge,
+      }
+    );
+
+    // Juvenile soft ring (does not change hitbox)
+    if (animal.alive && !animal.isAdult && animal.state !== 'DEAD') {
+      ctx.strokeStyle = 'rgba(255,255,255,0.3)';
       ctx.lineWidth = 1;
-      ctx.strokeRect(s.x - sz / 2 - 1, s.y - sz / 2 - 1, sz + 2, sz + 2);
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, animal.size * 0.65, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Legend (L) + tooltip
+  // ---------------------------------------------------------------------------
+
+  function drawLegend(ctx, ecosystem, stats) {
+    if (!ecosystem || !stats) return;
+
+    const shared = Wildborn.shapes.getShapeDefs().shared;
+    const plants = Wildborn.shapes.listSpeciesByCategory('plant');
+    const herbs = Wildborn.shapes.listSpeciesByCategory('herbivore');
+    const preds = Wildborn.shapes.listSpeciesByCategory('predator');
+
+    // Count plants by species
+    const plantCounts = {};
+    for (let i = 0; i < plants.length; i++) plantCounts[plants[i].id] = 0;
+    for (let i = 0; i < ecosystem.plants.length; i++) {
+      const p = ecosystem.plants[i];
+      if (p.alive) plantCounts[p.species] = (plantCounts[p.species] || 0) + 1;
     }
 
-    // Tiny hunger pip
-    const ratio = animal.calories / animal.maxCalories;
-    if (ratio < 0.35) {
-      ctx.fillStyle = ratio < 0.15 ? '#c44' : '#c90';
-      ctx.fillRect(s.x - sz / 2, s.y + sz / 2 + 1, sz * ratio, 2);
+    const rows = [];
+    rows.push({ header: 'PLANTS', color: shared.legendColors.plant });
+    for (let i = 0; i < plants.length; i++) {
+      rows.push({
+        id: plants[i].id,
+        label: plants[i].def.label,
+        count: plantCounts[plants[i].id] || 0,
+        color: shared.legendColors.plant,
+      });
+    }
+    rows.push({ header: 'HERBIVORES', color: shared.legendColors.herbivore });
+    for (let i = 0; i < herbs.length; i++) {
+      rows.push({
+        id: herbs[i].id,
+        label: herbs[i].def.label,
+        count: (stats.herbivores && stats.herbivores[herbs[i].id]) || 0,
+        color: shared.legendColors.herbivore,
+      });
+    }
+    rows.push({ header: 'PREDATORS', color: shared.legendColors.predator });
+    for (let i = 0; i < preds.length; i++) {
+      rows.push({
+        id: preds[i].id,
+        label: preds[i].def.label,
+        count: (stats.predators && stats.predators[preds[i].id]) || 0,
+        color: shared.legendColors.predator,
+      });
+    }
+
+    const rowH = 18;
+    const pad = 10;
+    const boxW = 200;
+    const boxH = pad * 2 + rows.length * rowH + 18;
+    const x = window.innerWidth - boxW - 12;
+    const y = 48;
+
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.78)';
+    ctx.fillRect(x, y, boxW, boxH);
+    ctx.strokeStyle = 'rgba(200, 200, 160, 0.35)';
+    ctx.strokeRect(x, y, boxW, boxH);
+
+    ctx.font = 'bold 12px monospace';
+    ctx.fillStyle = '#e8e4d4';
+    ctx.fillText('LEGEND  (L)', x + pad, y + 14);
+
+    let ry = y + 22;
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      if (row.header) {
+        ctx.fillStyle = row.color;
+        ctx.font = 'bold 11px monospace';
+        ctx.fillText(row.header, x + pad, ry + 12);
+      } else {
+        // Mini icon
+        ctx.save();
+        Wildborn.renderShapes.renderLegendIcon(ctx, row.id, x + pad + 12, ry + 9, 0.65);
+        ctx.restore();
+        ctx.font = '11px monospace';
+        ctx.fillStyle = '#e8e4d4';
+        ctx.fillText(row.label, x + pad + 24, ry + 12);
+        ctx.fillStyle = row.color;
+        ctx.fillText(String(row.count), x + boxW - pad - 28, ry + 12);
+      }
+      ry += rowH;
+    }
+  }
+
+  function ageLabel(entity) {
+    if (entity.kind === 'plant') return '—';
+    if (!entity.isAdult) return 'Baby';
+    const elderAge = (Wildborn.animal && Wildborn.animal.ADULT_AGE) || 30;
+    if (entity.age > elderAge + 80) return 'Elder';
+    return 'Adult';
+  }
+
+  function stateLabel(entity) {
+    if (entity.kind === 'plant') {
+      if (!entity.alive) return 'Depleted';
+      if (entity.calories < entity.maxCalories * 0.3) return 'Hungry';
+      return 'Idle';
+    }
+    const s = entity.state;
+    if (s === 'DEAD') return 'Dead';
+    if (s === 'EATING') return 'Eating';
+    if (s === 'FLEE') return entity._counterAttack ? 'Attacking' : 'Fleeing';
+    if (s === 'BREEDING' || s === 'SEEK_MATE') return 'Breeding';
+    if (s === 'SEEK_FOOD') {
+      if (
+        (entity.diet === 'predator' || entity.diet === 'omnivore') &&
+        entity.target &&
+        entity.target.kind === 'animal' &&
+        entity.target.alive
+      ) {
+        return 'Hunting';
+      }
+      return 'Hungry';
+    }
+    if (s === 'IDLE') {
+      const speed = Math.hypot(entity.vx || 0, entity.vy || 0);
+      if (
+        (entity.diet === 'predator' || entity.diet === 'omnivore') &&
+        speed < 8 &&
+        entity.calories > entity.maxCalories * 0.7
+      ) {
+        return 'Sleeping';
+      }
+      return 'Idle';
+    }
+    return s || 'Idle';
+  }
+
+  /**
+   * Find nearest entity under screen cursor (CSS pixels).
+   * @returns {object|null}
+   */
+  function pickEntityAt(ecosystem, camera, screenX, screenY) {
+    if (!ecosystem) return null;
+    const worldX = camera.x + screenX;
+    const worldY = camera.y + screenY;
+    let best = null;
+    let bestD = 22 * 22;
+
+    const plants = ecosystem.plants;
+    for (let i = 0; i < plants.length; i++) {
+      const p = plants[i];
+      if (!p.alive) continue;
+      const dx = p.x - worldX;
+      const dy = p.y - worldY;
+      const d2 = dx * dx + dy * dy;
+      const r = (p.size || 10) * 0.7;
+      if (d2 < r * r && d2 < bestD) {
+        bestD = d2;
+        best = p;
+      }
+    }
+
+    const animals = ecosystem.animals;
+    for (let i = 0; i < animals.length; i++) {
+      const a = animals[i];
+      // Respect panther stealth for picking
+      if (a.special === 'stealth' && a.alive && a.state !== 'DEAD') {
+        const cx = camera.x + camera.width / 2;
+        const cy = camera.y + camera.height / 2;
+        const dx = a.x - cx;
+        const dy = a.y - cy;
+        const reveal = a.stealthRevealDist || 120;
+        if (dx * dx + dy * dy > reveal * reveal) continue;
+      }
+      const dx = a.x - worldX;
+      const dy = a.y - worldY;
+      const d2 = dx * dx + dy * dy;
+      const r = (a.size || 10) * 0.75;
+      if (d2 < r * r && d2 < bestD) {
+        bestD = d2;
+        best = a;
+      }
+    }
+
+    return best;
+  }
+
+  function drawTooltip(ctx, entity, screenX, screenY) {
+    if (!entity) return;
+    const def = Wildborn.shapes.getSpeciesDef(entity.species);
+    const name = (def && def.label) || entity.label || entity.species;
+    const cal = Math.round(entity.calories);
+    const maxCal = Math.round(entity.maxCalories);
+    const age = ageLabel(entity);
+    const st = stateLabel(entity);
+
+    const lines = [
+      name,
+      cal + ' / ' + maxCal + ' cal',
+      'Age: ' + age,
+      'State: ' + st,
+    ];
+
+    ctx.font = '12px monospace';
+    let maxW = 0;
+    for (let i = 0; i < lines.length; i++) {
+      maxW = Math.max(maxW, ctx.measureText(lines[i]).width);
+    }
+    const pad = 8;
+    const boxW = maxW + pad * 2;
+    const boxH = lines.length * 15 + pad * 2;
+    let x = screenX + 14;
+    let y = screenY + 14;
+    if (x + boxW > window.innerWidth - 4) x = screenX - boxW - 10;
+    if (y + boxH > window.innerHeight - 4) y = screenY - boxH - 10;
+
+    ctx.fillStyle = 'rgba(0,0,0,0.82)';
+    ctx.fillRect(x, y, boxW, boxH);
+    ctx.strokeStyle = 'rgba(220,210,160,0.4)';
+    ctx.strokeRect(x, y, boxW, boxH);
+
+    for (let i = 0; i < lines.length; i++) {
+      ctx.fillStyle = i === 0 ? '#f0e8c8' : '#d8d4c4';
+      if (i === 0) ctx.font = 'bold 12px monospace';
+      else ctx.font = '12px monospace';
+      ctx.fillText(lines[i], x + pad, y + pad + (i + 1) * 15 - 4);
     }
   }
 
   /**
    * F3 ecosystem debug panel — counts & average calories by species.
-   * @param {CanvasRenderingContext2D} ctx
-   * @param {object|null} stats from ecosystem.getDebugStats()
    */
   function drawEcosystemDebug(ctx, stats) {
     if (!stats) return;
@@ -292,6 +725,9 @@
     drawPlayer,
     drawEcosystem,
     drawEcosystemDebug,
+    drawLegend,
+    drawTooltip,
+    pickEntityAt,
     updateHud,
     setSeedDisplay,
     drawDebug,

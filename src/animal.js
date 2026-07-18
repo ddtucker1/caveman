@@ -492,6 +492,7 @@
     animal.vy = 0;
     animal.corpseCalories = animal.maxCalories * animal.corpseYield;
     animal.corpseDecay = 80; // ticks until corpse vanishes
+    animal.deadAt = null; // render sets wall-clock time on first draw
     animal.target = null;
     animal.mateTarget = null;
     if (killer && killer.alive) {
@@ -668,6 +669,15 @@
     if (animal.special === 'howl' && animal.packCallTimer <= 0 && t.kind === 'animal' && t.alive) {
       animal.packCallTimer = animal.packCallSeconds || 3;
       animal._howlPulse = true;
+    }
+    // Lion roar cue when engaging prey (visual + brief pack awareness)
+    if (
+      animal.special === 'female_hunt' &&
+      animal.packCallTimer <= 0 &&
+      t.kind === 'animal' &&
+      t.alive
+    ) {
+      animal.packCallTimer = 1.2;
     }
 
     moveToward(animal, t.x, t.y, dt, animal.state === AI_STATE.SEEK_FOOD ? 1 : 1);

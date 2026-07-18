@@ -20,5 +20,8 @@
 
     /** Show ecosystem debug overlay (also toggleable with F3 in-game). */
     ecosystemDebugOverlay: false,
+
+    /** Show species legend panel (also toggleable with L in-game). */
+    showLegend: false,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

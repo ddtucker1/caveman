@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Wildborn Shape Gallery</title>
+  <style>
+    body { margin: 0; background: #2a3324; }
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+  <canvas id="c" width="1200" height="800"></canvas>
+  <script src="../src/shapes.js"></script>
+  <script src="../src/renderShapes.js"></script>
+  <script>
+    const canvas = document.getElementById('c');
+    const ctx = canvas.getContext('2d');
+    // Light tan ground
+    ctx.fillStyle = '#c2a86a';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = 'rgba(74,122,52,0.75)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const herbs = Object.keys(Wildborn.shapes.getShapeDefs().herbivores);
+    const preds = Object.keys(Wildborn.shapes.getShapeDefs().predators);
+    const plants = Object.keys(Wildborn.shapes.getShapeDefs().plants);
+
+    ctx.fillStyle = '#f0ecd8';
+    ctx.font = 'bold 18px sans-serif';
+    ctx.fillText('Herbivores', 24, 36);
+    ctx.fillText('Predators', 24, 280);
+    ctx.fillText('Plants', 24, 500);
+
+    function drawRow(ids, y0, states) {
+      ids.forEach((id, i) => {
+        const x = 80 + i * 120;
+        const y = y0;
+        const st = (states && states[i]) || 'IDLE';
+        Wildborn.renderShapes.renderShape(ctx, id, x, y, 1.6, true, {
+          time: 1.2,
+          state: st,
+          calories: 80,
+          maxCalories: 100,
+          sex: 'male',
+          isAdult: true,
+          id: i + 1,
+          hunting: st === 'SEEK_FOOD',
+          fleeing: st === 'FLEE',
+          eating: st === 'EATING',
+          roaring: id === 'lion',
+          stalking: id === 'panther',
+          inWater: id === 'alligator',
+          moving: st === 'IDLE' ? false : true,
+        });
+        ctx.fillStyle = '#e8e4d4';
+        ctx.font = '12px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(id, x, y + 42);
+        ctx.textAlign = 'start';
+      });
+    }
+
+    drawRow(herbs, 120, null);
+    // Second herbivore row with flee/eat demos for first few
+    drawRow(herbs.slice(0, 5), 200, ['FLEE', 'EATING', 'IDLE', 'FLEE', 'EATING']);
+    drawRow(preds, 360, ['SEEK_FOOD', 'SEEK_FOOD', 'SEEK_FOOD', 'SEEK_FOOD', 'SEEK_FOOD']);
+    drawRow(plants, 580, null);
+
+    // Legend strip
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(20, 700, 500, 70);
+    ctx.fillStyle = '#8fd050';
+    ctx.font = '14px monospace';
+    ctx.fillText('Green labels = plants  |  Yellow = herbivores  |  Red = predators', 36, 730);
+    ctx.fillText('Shapes are data-driven via shapes.json / renderShape()', 36, 752);
+  </script>
+</body>
+</html>
