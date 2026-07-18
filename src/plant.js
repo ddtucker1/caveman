@@ -63,6 +63,8 @@
   const SPECIES_LIST = Object.keys(PLANT_SPECIES);
   const START_CALORIES = 10;
   const RESPAWN_DELAY_TICKS = 40;
+  /** Calories lost per tick when a plant sits on non-grass terrain. */
+  const WITHER_PER_TICK = 0.1;
 
   let nextPlantId = 1;
 
@@ -127,17 +129,29 @@
   }
 
   /**
-   * One ecosystem tick: grow if alive, or count down respawn.
+   * One ecosystem tick: grow if alive on grass, wither off grass, or respawn.
    * @param {object} plant
    * @param {function(number,number):{x:number,y:number}|null} findRespawnSpot
+   * @param {function(number,number):boolean} [isGrassAt] — world grass check
    */
-  function updatePlant(plant, findRespawnSpot) {
+  function updatePlant(plant, findRespawnSpot, isGrassAt) {
     if (plant.alive) {
-      if (plant.calories < plant.maxCalories) {
-        plant.calories = Math.min(
-          plant.maxCalories,
-          plant.calories + plant.growthPerTick
-        );
+      const onGrass = !isGrassAt || isGrassAt(plant.x, plant.y);
+      if (onGrass) {
+        if (plant.calories < plant.maxCalories) {
+          plant.calories = Math.min(
+            plant.maxCalories,
+            plant.calories + plant.growthPerTick
+          );
+        }
+      } else {
+        // Off-grass edge case: stop growing and slowly wither
+        plant.calories -= WITHER_PER_TICK;
+        if (plant.calories <= 0) {
+          plant.calories = 0;
+          plant.alive = false;
+          plant.respawnTimer = RESPAWN_DELAY_TICKS;
+        }
       }
       return;
     }
@@ -155,14 +169,44 @@
     plant.respawnTimer = 0;
   }
 
+  /**
+   * Relocate a plant to the nearest grass tile (spiral search).
+   * @param {object} plant
+   * @param {object} world
+   * @param {number} [maxRadius]
+   * @returns {boolean} whether a grass tile was found
+   */
+  function relocateToGrass(plant, world, maxRadius) {
+    maxRadius = maxRadius == null ? 24 : maxRadius;
+    const TILE_SIZE = world.TILE_SIZE || Wildborn.world.TILE_SIZE;
+    const tx0 = Math.floor(plant.x / TILE_SIZE);
+    const ty0 = Math.floor(plant.y / TILE_SIZE);
+    for (let r = 0; r <= maxRadius; r++) {
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.abs(dx) !== r && Math.abs(dy) !== r && r > 0) continue;
+          const tile = world.getTile(tx0 + dx, ty0 + dy);
+          if (world.isGrass(tile)) {
+            plant.x = (tx0 + dx) * TILE_SIZE + TILE_SIZE / 2;
+            plant.y = (ty0 + dy) * TILE_SIZE + TILE_SIZE / 2;
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
   Wildborn.plant = {
     PLANT_SPECIES,
     SPECIES_LIST,
     START_CALORIES,
     RESPAWN_DELAY_TICKS,
+    WITHER_PER_TICK,
     createPlant,
     pickSpecies,
     consumePlant,
     updatePlant,
+    relocateToGrass,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -10,21 +10,26 @@
   const AI_STATE = {
     IDLE: 'IDLE',
     SEEK_FOOD: 'SEEK_FOOD',
+    SEEK_PREY: 'SEEK_PREY',
     EATING: 'EATING',
     FLEE: 'FLEE',
     SEEK_MATE: 'SEEK_MATE',
     BREEDING: 'BREEDING',
+    ROAM: 'ROAM',
     DEAD: 'DEAD',
   };
 
-  /** Speed multipliers → pixels per second. */
+  /** Speed multipliers → pixels per second (halved for observability; min 0.5). */
   const SPEED = {
-    very_slow: 28,
-    slow: 45,
-    medium: 70,
-    fast: 105,
-    very_fast: 145,
+    very_slow: 14,
+    slow: 22.5,
+    medium: 35,
+    fast: 52.5,
+    very_fast: 72.5,
   };
+  const MIN_SPEED = 0.5;
+  /** Animals on water move at half their current speed. */
+  const WATER_SPEED_MULT = 0.5;
 
   // ---------------------------------------------------------------------------
   // Species definitions
@@ -279,6 +284,10 @@
   const HUNGER_SEEK_RATIO = 0.3;
   /** Ticks in one "day" for calorie drain (120 × 0.5s ≈ 60s real time). */
   const DAY_TICKS = 120;
+  /** Global calorie burn scale — animals previously burned ~10× too fast. */
+  const CALORIE_BURN_DIVISOR = 10;
+  /** Minimum calories burned per ecosystem tick. */
+  const MIN_CALORIE_BURN = 0.5;
   const EAT_RANGE = 18;
   const ATTACK_RANGE = 22;
   const MATE_RANGE = 28;
@@ -289,6 +298,23 @@
   const EAT_RATE = 12; // calories per tick while eating
   const ATTACK_COOLDOWN_TICKS = 2;
   const IDLE_WANDER_CHANCE = 0.35;
+
+  /** Predators hunt at ≤30% calories; return to roaming at ≥80%. */
+  const PREDATOR_HUNT_RATIO = 0.3;
+  const PREDATOR_SATIATED_RATIO = 0.8;
+  /** Roam within this radius of spawn while not hunting. */
+  const TERRITORY_RADIUS = 200;
+  /** Flee desperation: cross water if predator within this distance. */
+  const WATER_DESPERATION_FLEE_DIST = 100;
+  /** Starvation desperation: cross water below this calorie ratio. */
+  const WATER_DESPERATION_STARVE_RATIO = 0.2;
+  /** Chicken egg interval was ~50–90 ticks; 10× rarer → ~500–900. */
+  const EGG_TIMER_BASE = 500;
+  const EGG_TIMER_JITTER = 400;
+  /** Poop while roaming: every 5–10s, fade after 30s. */
+  const POOP_INTERVAL_MIN = 5;
+  const POOP_INTERVAL_MAX = 10;
+  const POOP_FADE_SECONDS = 30;
 
   let nextAnimalId = 1;
 
@@ -312,6 +338,9 @@
     // Adults spawn well-fed so the ecosystem stabilizes before the first hunt.
     const startCal = isOffspring ? maxCal * 0.2 : maxCal * 0.85 + Math.random() * maxCal * 0.1;
 
+    const baseSpeed = Math.max(MIN_SPEED, SPEED[def.speed] || SPEED.medium);
+    const isPred = def.diet === 'predator' || def.diet === 'omnivore';
+
     return {
       kind: 'animal',
       id: nextAnimalId++,
@@ -322,6 +351,9 @@
       y: y,
       vx: 0,
       vy: 0,
+      /** Home point for predator territory roaming. */
+      spawnX: x,
+      spawnY: y,
 
       calories: startCal,
       maxCalories: maxCal,
@@ -334,7 +366,7 @@
       growth: isOffspring ? 0.2 : 1, // scale toward adult size
       isAdult: !isOffspring,
 
-      state: AI_STATE.IDLE,
+      state: isPred ? AI_STATE.ROAM : AI_STATE.IDLE,
       stateTimer: 0,
       target: null,
       mateTarget: null,
@@ -345,7 +377,7 @@
       sex: opts.sex || (Math.random() < 0.5 ? 'male' : 'female'),
 
       speedKey: def.speed,
-      baseSpeed: SPEED[def.speed] || SPEED.medium,
+      baseSpeed: baseSpeed,
       waterSpeedKey: def.waterSpeed || null,
       attackPower: def.attackPower || 5,
       defense: def.defense || 'flee',
@@ -366,13 +398,31 @@
       packCallTimer: 0, // seconds remaining for pack to join
       burrowed: false,
       burrowTimer: 0,
-      eggTimer: def.special === 'eggs' ? 40 + Math.floor(Math.random() * 40) : 0,
+      eggTimer:
+        def.special === 'eggs'
+          ? EGG_TIMER_BASE + Math.floor(Math.random() * EGG_TIMER_JITTER)
+          : 0,
+      /** Seconds until next visual poop while roaming (predators). */
+      poopTimer: isPred ? 5 + Math.random() * 5 : 0,
 
       // Corpse fields (set on death)
       corpseCalories: 0,
       corpseDecay: 0,
       alive: true,
     };
+  }
+
+  /**
+   * Per-tick calorie drain: (daily need / DAY_TICKS) / 10, rounded to 1 decimal.
+   * Floor at MIN_CALORIE_BURN (0.5). Species whose scaled rate is below the floor
+   * keep a 2-decimal scaled value so small animals are not forced to burn faster.
+   */
+  function calorieBurnPerTick(animal) {
+    const raw = animal.caloriesNeededPerDay / DAY_TICKS / CALORIE_BURN_DIVISOR;
+    const rounded = Math.round(raw * 10) / 10;
+    if (rounded >= MIN_CALORIE_BURN) return rounded;
+    // Preserve relative differences for sub-0.5 scaled rates (still ~10× slower)
+    return Math.max(0.1, Math.round(raw * 100) / 100);
   }
 
   // ---------------------------------------------------------------------------
@@ -413,43 +463,163 @@
     return dx * dx + dy * dy;
   }
 
-  function moveToward(animal, tx, ty, dt, speedMult) {
+  function effectiveSpeed(animal, speedMult) {
     speedMult = speedMult == null ? 1 : speedMult;
+    let speed = Math.max(MIN_SPEED, animal.baseSpeed * speedMult);
+    // Alligator: faster in water (still subject to the global water penalty below)
+    if (animal.special === 'ambush' && animal._inWater) {
+      speed = Math.max(MIN_SPEED, SPEED.fast);
+    }
+    // Offspring follow a bit slower
+    if (!animal.isAdult) speed *= 0.7;
+    // Growth scale slightly affects speed
+    speed *= 0.7 + 0.3 * animal.growth;
+    // Water halves current speed (stacks with global speed halve → ~25% of original)
+    if (animal._inWater && animal.special !== 'ambush') {
+      speed *= WATER_SPEED_MULT;
+    } else if (animal._inWater && animal.special === 'ambush') {
+      // Ambush predators keep water bonus but still pay half vs land-equivalent
+      speed *= WATER_SPEED_MULT;
+    }
+    return Math.max(MIN_SPEED, speed);
+  }
+
+  /**
+   * True when the animal may enter water: fleeing a nearby predator, or starving
+   * with food across the water.
+   */
+  function canCrossWater(animal, ctx) {
+    if (animal.special === 'ambush') return true;
+    if (animal.state === AI_STATE.FLEE && animal.fleeFrom && animal.fleeFrom.alive) {
+      const d = Math.hypot(animal.x - animal.fleeFrom.x, animal.y - animal.fleeFrom.y);
+      if (d <= WATER_DESPERATION_FLEE_DIST) return true;
+    }
+    if (hungerRatio(animal) < WATER_DESPERATION_STARVE_RATIO && animal.target) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Pick a step toward (tx,ty), detouring around water when possible.
+   * Returns {x,y} waypoint (may equal target).
+   */
+  function pathWaypoint(animal, tx, ty, ctx) {
+    if (!ctx.isWater || canCrossWater(animal, ctx)) {
+      return { x: tx, y: ty };
+    }
+
     const dx = tx - animal.x;
     const dy = ty - animal.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const step = Math.min(48, len);
+    const nx = animal.x + (dx / len) * step;
+    const ny = animal.y + (dy / len) * step;
+
+    // Direct path clear of water — go straight
+    if (!ctx.isWater(nx, ny) && !segmentHitsWater(animal.x, animal.y, nx, ny, ctx)) {
+      return { x: tx, y: ty };
+    }
+
+    // Try perpendicular detours (left/right of travel direction)
+    const px = -dy / len;
+    const py = dx / len;
+    const offsets = [40, 70, 110, -40, -70, -110];
+    let best = null;
+    let bestScore = Infinity;
+    for (let i = 0; i < offsets.length; i++) {
+      const ox = animal.x + px * offsets[i] + (dx / len) * step * 0.6;
+      const oy = animal.y + py * offsets[i] + (dy / len) * step * 0.6;
+      if (ctx.isWater(ox, oy)) continue;
+      if (segmentHitsWater(animal.x, animal.y, ox, oy, ctx)) continue;
+      const score = Math.hypot(ox - tx, oy - ty) + Math.abs(offsets[i]) * 0.15;
+      if (score < bestScore) {
+        bestScore = score;
+        best = { x: ox, y: oy };
+      }
+    }
+    if (best) return best;
+
+    // No dry detour — hold position rather than walk into water
+    return { x: animal.x, y: animal.y };
+  }
+
+  function segmentHitsWater(x0, y0, x1, y1, ctx) {
+    if (!ctx.isWater) return false;
+    for (let i = 1; i <= 4; i++) {
+      const t = i / 4;
+      const x = x0 + (x1 - x0) * t;
+      const y = y0 + (y1 - y0) * t;
+      if (ctx.isWater(x, y)) return true;
+    }
+    return false;
+  }
+
+  function moveToward(animal, tx, ty, dt, speedMult, ctx) {
+    const waypoint = ctx ? pathWaypoint(animal, tx, ty, ctx) : { x: tx, y: ty };
+    const dx = waypoint.x - animal.x;
+    const dy = waypoint.y - animal.y;
     const len = Math.hypot(dx, dy);
     if (len < 0.5) {
       animal.vx = 0;
       animal.vy = 0;
       return;
     }
-    let speed = animal.baseSpeed * speedMult;
-    // Alligator: faster in water
-    if (animal.special === 'ambush' && animal._inWater) {
-      speed = SPEED.fast;
-    }
-    // Offspring follow a bit slower
-    if (!animal.isAdult) speed *= 0.7;
-    // Growth scale slightly affects speed
-    speed *= 0.7 + 0.3 * animal.growth;
+    const speed = effectiveSpeed(animal, speedMult);
 
     animal.vx = (dx / len) * speed;
     animal.vy = (dy / len) * speed;
+    const prevX = animal.x;
+    const prevY = animal.y;
     animal.x += animal.vx * dt;
     animal.y += animal.vy * dt;
+
+    // Splash particles when moving through water
+    if (animal._inWater && ctx && ctx.spawnSplash) {
+      const moved = Math.hypot(animal.x - prevX, animal.y - prevY);
+      if (moved > 0.5) ctx.spawnSplash(animal.x, animal.y);
+    }
   }
 
-  function wander(animal, dt, rng) {
+  function wander(animal, dt, rng, ctx) {
     if (animal.stateTimer <= 0 || (animal.vx === 0 && animal.vy === 0)) {
       const angle = rng.float() * Math.PI * 2;
-      const speed = animal.baseSpeed * 0.4;
+      let speed = Math.max(MIN_SPEED, animal.baseSpeed * 0.4);
+      if (animal._inWater) speed *= WATER_SPEED_MULT;
       animal.vx = Math.cos(angle) * speed;
       animal.vy = Math.sin(angle) * speed;
       animal.stateTimer = 1 + rng.float() * 2;
     }
-    animal.x += animal.vx * dt;
-    animal.y += animal.vy * dt;
+
+    // Soft water avoidance while wandering (unless desperate / alligator)
+    let nx = animal.x + animal.vx * dt;
+    let ny = animal.y + animal.vy * dt;
+    if (ctx && ctx.isWater && ctx.isWater(nx, ny) && !canCrossWater(animal, ctx)) {
+      // Turn away from water
+      animal.vx = -animal.vx;
+      animal.vy = -animal.vy;
+      animal.stateTimer = 0.4 + rng.float() * 0.6;
+      nx = animal.x + animal.vx * dt;
+      ny = animal.y + animal.vy * dt;
+      if (ctx.isWater(nx, ny)) {
+        // Still wet — stay put this frame
+        animal.vx = 0;
+        animal.vy = 0;
+        animal.stateTimer = 0;
+        return;
+      }
+    }
+
+    const prevX = animal.x;
+    const prevY = animal.y;
+    animal.x = nx;
+    animal.y = ny;
     animal.stateTimer -= dt;
+
+    if (animal._inWater && ctx && ctx.spawnSplash) {
+      const moved = Math.hypot(animal.x - prevX, animal.y - prevY);
+      if (moved > 0.5) ctx.spawnSplash(animal.x, animal.y);
+    }
   }
 
   function applyDamage(target, amount, attacker) {
@@ -520,8 +690,8 @@
     }
     parentA.breedingCooldown = BREED_COOLDOWN;
     parentB.breedingCooldown = BREED_COOLDOWN;
-    parentA.state = AI_STATE.IDLE;
-    parentB.state = AI_STATE.IDLE;
+    parentA.state = isPredator(parentA) ? AI_STATE.ROAM : AI_STATE.IDLE;
+    parentB.state = isPredator(parentB) ? AI_STATE.ROAM : AI_STATE.IDLE;
     parentA.mateTarget = null;
     parentB.mateTarget = null;
     parentA.calories *= 0.85;
@@ -567,16 +737,25 @@
         }
       );
       if (adult) {
-        moveToward(animal, adult.x, adult.y, dt, 0.85);
+        moveToward(animal, adult.x, adult.y, dt, 0.85, ctx);
         return;
       }
+    }
+
+    // Predator hunger gate: hunt only at ≤30%, roam above that until 80% after a hunt
+    if (isPredator(animal) && animal.diet !== 'herbivore') {
+      updatePredatorHungerGate(animal);
     }
 
     switch (animal.state) {
       case AI_STATE.IDLE:
         updateIdle(animal, dt, ctx);
         break;
+      case AI_STATE.ROAM:
+        updateRoam(animal, dt, ctx);
+        break;
       case AI_STATE.SEEK_FOOD:
+      case AI_STATE.SEEK_PREY:
         updateSeekFood(animal, dt, ctx);
         break;
       case AI_STATE.EATING:
@@ -591,14 +770,88 @@
       case AI_STATE.BREEDING:
         // Brief pause while breeding resolves on tick
         animal.stateTimer -= dt;
-        if (animal.stateTimer <= 0) animal.state = AI_STATE.IDLE;
+        if (animal.stateTimer <= 0) {
+          animal.state = isPredator(animal) ? AI_STATE.ROAM : AI_STATE.IDLE;
+        }
         break;
       default:
-        wander(animal, dt, ctx.rng);
+        wander(animal, dt, ctx.rng, ctx);
+    }
+  }
+
+  /**
+   * Predators: ROAM while calories > 30%; enter SEEK_PREY at ≤30%;
+   * stay hunting until calories ≥ 80%, then return to ROAM.
+   */
+  function updatePredatorHungerGate(animal) {
+    const ratio = hungerRatio(animal);
+    if (animal.state === AI_STATE.DEAD || animal.state === AI_STATE.FLEE) return;
+    if (animal.state === AI_STATE.BREEDING || animal.state === AI_STATE.SEEK_MATE) return;
+
+    if (animal.state === AI_STATE.SEEK_PREY || animal.state === AI_STATE.SEEK_FOOD || animal.state === AI_STATE.EATING) {
+      if (ratio >= PREDATOR_SATIATED_RATIO) {
+        animal.state = AI_STATE.ROAM;
+        animal.target = null;
+        animal._hunting = false;
+      } else if (ratio <= PREDATOR_HUNT_RATIO || animal._hunting) {
+        animal._hunting = true;
+        if (animal.state !== AI_STATE.EATING) animal.state = AI_STATE.SEEK_PREY;
+      }
+      return;
+    }
+
+    // Roaming / idle predators
+    if (ratio <= PREDATOR_HUNT_RATIO) {
+      animal.state = AI_STATE.SEEK_PREY;
+      animal.target = null;
+      animal._hunting = true;
+    } else if (animal.state === AI_STATE.IDLE) {
+      animal.state = AI_STATE.ROAM;
+    }
+  }
+
+  function updateRoam(animal, dt, ctx) {
+    // Drop into hunt immediately if calories crossed the threshold mid-frame
+    if (hungerRatio(animal) <= PREDATOR_HUNT_RATIO) {
+      animal.state = AI_STATE.SEEK_PREY;
+      animal.target = null;
+      animal._hunting = true;
+      return;
+    }
+
+    // Occasional breeding while satiated
+    if (canBreed(animal) && animal.isAdult && ctx.rng.chance(0.02 * dt)) {
+      animal.state = AI_STATE.SEEK_MATE;
+      animal.mateTarget = null;
+      return;
+    }
+
+    // Stay inside territory radius around spawn
+    const dx = animal.x - animal.spawnX;
+    const dy = animal.y - animal.spawnY;
+    const dist = Math.hypot(dx, dy);
+    if (dist > TERRITORY_RADIUS) {
+      moveToward(animal, animal.spawnX, animal.spawnY, dt, 0.5, ctx);
+    } else {
+      wander(animal, dt, ctx.rng, ctx);
+    }
+
+    // Visual poop every 5–10 seconds while roaming
+    animal.poopTimer -= dt;
+    if (animal.poopTimer <= 0) {
+      if (ctx.spawnPoop) ctx.spawnPoop(animal.x, animal.y);
+      animal.poopTimer =
+        POOP_INTERVAL_MIN + ctx.rng.float() * (POOP_INTERVAL_MAX - POOP_INTERVAL_MIN);
     }
   }
 
   function updateIdle(animal, dt, ctx) {
+    // Predators use ROAM instead of IDLE
+    if (isPredator(animal) && animal.diet !== 'herbivore') {
+      animal.state = AI_STATE.ROAM;
+      return;
+    }
+
     // Threat scan (herbivores / ostriches)
     if (isHerbivore(animal) || animal.special === 'runs_from_all') {
       const threat = ctx.findNearestAnimal(
@@ -633,11 +886,7 @@
       return;
     }
 
-    if (ctx.rng.chance(IDLE_WANDER_CHANCE * dt * 2)) {
-      wander(animal, dt, ctx.rng);
-    } else {
-      wander(animal, dt, ctx.rng);
-    }
+    wander(animal, dt, ctx.rng, ctx);
   }
 
   function updateSeekFood(animal, dt, ctx) {
@@ -647,8 +896,14 @@
     }
 
     if (!animal.target) {
-      wander(animal, dt, ctx.rng);
-      if (!isHungry(animal) && hungerRatio(animal) > 0.6) animal.state = AI_STATE.IDLE;
+      wander(animal, dt, ctx.rng, ctx);
+      if (isPredator(animal) && animal._hunting) {
+        // Keep hunting until satiated even if no prey nearby
+        return;
+      }
+      if (!isHungry(animal) && hungerRatio(animal) > 0.6) {
+        animal.state = isPredator(animal) ? AI_STATE.ROAM : AI_STATE.IDLE;
+      }
       return;
     }
 
@@ -680,7 +935,7 @@
       animal.packCallTimer = 1.2;
     }
 
-    moveToward(animal, t.x, t.y, dt, animal.state === AI_STATE.SEEK_FOOD ? 1 : 1);
+    moveToward(animal, t.x, t.y, dt, 1, ctx);
   }
 
   function isValidFoodTarget(animal, t) {
@@ -716,11 +971,20 @@
       if (corpse && (isPredator(animal) || isHungry(animal))) return corpse;
     }
 
-    if (animal.diet === 'predator' || (animal.diet === 'omnivore' && hungerRatio(animal) < 0.5)) {
-      // Lion females do most hunting
-      if (animal.special === 'female_hunt' && animal.sex === 'male' && hungerRatio(animal) > 0.25) {
+    if (
+      animal.diet === 'predator' ||
+      animal.state === AI_STATE.SEEK_PREY ||
+      (animal.diet === 'omnivore' && (animal._hunting || hungerRatio(animal) < 0.5))
+    ) {
+      // Lion females do most hunting (males only when hungrier), unless already in hunt mode
+      if (
+        animal.special === 'female_hunt' &&
+        animal.sex === 'male' &&
+        hungerRatio(animal) > 0.25 &&
+        !animal._hunting
+      ) {
         // Males hunt only when hungrier
-      }
+      } else {
       const prey = ctx.findNearestAnimal(
         animal.x,
         animal.y,
@@ -742,6 +1006,7 @@
           }
         );
         if (rival) return rival;
+      }
       }
     }
 
@@ -795,7 +1060,8 @@
           m.state !== AI_STATE.DEAD
         ) {
           m.target = prey;
-          m.state = AI_STATE.SEEK_FOOD;
+          m.state = AI_STATE.SEEK_PREY;
+          m._hunting = true;
           m.packCallTimer = attacker.packCallSeconds || 3;
         }
       }
@@ -844,14 +1110,20 @@
     const t = animal.target;
     if (!isValidFoodTarget(animal, t)) {
       animal.target = null;
-      animal.state = isHungry(animal) ? AI_STATE.SEEK_FOOD : AI_STATE.IDLE;
+      if (isPredator(animal) && animal._hunting && hungerRatio(animal) < PREDATOR_SATIATED_RATIO) {
+        animal.state = AI_STATE.SEEK_PREY;
+      } else if (isHungry(animal)) {
+        animal.state = AI_STATE.SEEK_FOOD;
+      } else {
+        animal.state = isPredator(animal) ? AI_STATE.ROAM : AI_STATE.IDLE;
+      }
       return;
     }
 
     // Stay near food
     const d2 = dist2(animal.x, animal.y, t.x, t.y);
     if (d2 > (EAT_RANGE + 8) * (EAT_RANGE + 8)) {
-      moveToward(animal, t.x, t.y, dt, 0.8);
+      moveToward(animal, t.x, t.y, dt, 0.8, ctx);
       return;
     }
 
@@ -886,11 +1158,11 @@
       if (d2 <= ATTACK_RANGE * ATTACK_RANGE) {
         tryAttack(animal, t, ctx);
       } else {
-        moveToward(animal, t.x, t.y, dt, 1.1);
+        moveToward(animal, t.x, t.y, dt, 1.1, ctx);
       }
       if (animal.stateTimer <= 0) {
         animal._counterAttack = false;
-        animal.state = AI_STATE.IDLE;
+        animal.state = isPredator(animal) ? AI_STATE.ROAM : AI_STATE.IDLE;
       }
       return;
     }
@@ -898,7 +1170,7 @@
     const threat = animal.fleeFrom;
     if (!threat || !threat.alive || animal.stateTimer <= 0) {
       animal.fleeFrom = null;
-      animal.state = AI_STATE.IDLE;
+      animal.state = isPredator(animal) ? AI_STATE.ROAM : AI_STATE.IDLE;
       return;
     }
 
@@ -908,7 +1180,7 @@
     const fleeSpeed = animal.special === 'runs_from_all' ? 1.3 : 1.15;
     const tx = animal.x + (dx / len) * 80;
     const ty = animal.y + (dy / len) * 80;
-    moveToward(animal, tx, ty, dt, fleeSpeed);
+    moveToward(animal, tx, ty, dt, fleeSpeed, ctx);
 
     // Deer alert: mark nearby deer to flee
     if (animal._alertPulse) {
@@ -927,13 +1199,18 @@
 
   function updateSeekMate(animal, dt, ctx) {
     if (!canBreed(animal)) {
-      animal.state = AI_STATE.IDLE;
+      animal.state = isPredator(animal) ? AI_STATE.ROAM : AI_STATE.IDLE;
       animal.mateTarget = null;
       return;
     }
 
     // Interrupt for hunger / threats
-    if (isHungry(animal)) {
+    if (isPredator(animal) && hungerRatio(animal) <= PREDATOR_HUNT_RATIO) {
+      animal.state = AI_STATE.SEEK_PREY;
+      animal._hunting = true;
+      return;
+    }
+    if (!isPredator(animal) && isHungry(animal)) {
       animal.state = AI_STATE.SEEK_FOOD;
       return;
     }
@@ -950,7 +1227,7 @@
     }
 
     if (!animal.mateTarget) {
-      wander(animal, dt, ctx.rng);
+      wander(animal, dt, ctx.rng, ctx);
       return;
     }
 
@@ -967,7 +1244,7 @@
       return;
     }
 
-    moveToward(animal, mate.x, mate.y, dt, 0.75);
+    moveToward(animal, mate.x, mate.y, dt, 0.75, ctx);
   }
 
   // ---------------------------------------------------------------------------
@@ -991,8 +1268,8 @@
       return result;
     }
 
-    // Hunger drain: caloriesNeededPerDay spread across DAY_TICKS
-    const drain = animal.caloriesNeededPerDay / DAY_TICKS;
+    // Hunger drain: daily need / DAY_TICKS, then ÷10, min 0.5 cal/tick
+    const drain = calorieBurnPerTick(animal);
     animal.calories -= drain;
 
     // Age / growth
@@ -1014,22 +1291,27 @@
       animal.health = Math.min(animal.maxHealth, animal.health + animal.regenPerTick);
     }
 
-    // Chicken eggs
+    // Chicken eggs — 1/10th prior rate; max 1 uneaten egg per chicken on screen
     if (animal.special === 'eggs' && animal.isAdult && animal.alive) {
       animal.eggTimer -= 1;
       if (animal.eggTimer <= 0) {
-        result.eggs = result.eggs || [];
-        result.eggs.push({
-          kind: 'egg',
-          id: 'egg-' + animal.id + '-' + animal.age,
-          x: animal.x + ctx.rng.range(-6, 6),
-          y: animal.y + ctx.rng.range(-6, 6),
-          calories: 15,
-          color: '#f5f0e0',
-          size: 4,
-          decay: 60,
-        });
-        animal.eggTimer = 50 + ctx.rng.int(0, 40);
+        const hasEgg =
+          ctx.hasEggFromChicken && ctx.hasEggFromChicken(animal.id);
+        if (!hasEgg) {
+          result.eggs = result.eggs || [];
+          result.eggs.push({
+            kind: 'egg',
+            id: 'egg-' + animal.id + '-' + animal.age,
+            chickenId: animal.id,
+            x: animal.x + ctx.rng.range(-6, 6),
+            y: animal.y + ctx.rng.range(-6, 6),
+            calories: 15,
+            color: '#f5f0e0',
+            size: 4,
+            decay: 60,
+          });
+        }
+        animal.eggTimer = EGG_TIMER_BASE + ctx.rng.int(0, EGG_TIMER_JITTER);
       }
     }
 
@@ -1038,14 +1320,14 @@
       const t = animal.target;
       const room = animal.maxCalories - animal.calories;
       if (room <= 0) {
-        animal.state = AI_STATE.IDLE;
+        animal.state = postEatState(animal);
         animal.target = null;
       } else if (t.kind === 'plant' && t.alive) {
         const eaten = Wildborn.plant.consumePlant(t, Math.min(EAT_RATE, room));
         animal.calories += eaten;
         if (!t.alive || animal.calories >= animal.maxCalories * 0.95) {
           animal.target = null;
-          animal.state = AI_STATE.IDLE;
+          animal.state = postEatState(animal);
         }
       } else if (t.kind === 'animal' && t.state === AI_STATE.DEAD) {
         const eaten = Math.min(EAT_RATE * 1.5, t.corpseCalories, room);
@@ -1053,7 +1335,7 @@
         animal.calories += eaten;
         if (t.corpseCalories <= 0 || animal.calories >= animal.maxCalories * 0.95) {
           animal.target = null;
-          animal.state = AI_STATE.IDLE;
+          animal.state = postEatState(animal);
         }
       } else if (t.kind === 'egg') {
         const eaten = Math.min(EAT_RATE, t.calories, room);
@@ -1061,7 +1343,7 @@
         animal.calories += eaten;
         if (t.calories <= 0 || animal.calories >= animal.maxCalories * 0.95) {
           animal.target = null;
-          animal.state = AI_STATE.IDLE;
+          animal.state = postEatState(animal);
         }
       }
     }
@@ -1090,11 +1372,26 @@
       } else if (!mate || !mate.alive) {
         animal._readyToBreed = false;
         animal.mateTarget = null;
-        if (animal.alive) animal.state = AI_STATE.IDLE;
+        if (animal.alive) {
+          animal.state = isPredator(animal) ? AI_STATE.ROAM : AI_STATE.IDLE;
+        }
       }
     }
 
     return result;
+  }
+
+  /** After eating: predators keep hunting until 80%, else roam/idle. */
+  function postEatState(animal) {
+    if (isPredator(animal) && animal.diet !== 'herbivore') {
+      if (hungerRatio(animal) >= PREDATOR_SATIATED_RATIO) {
+        animal._hunting = false;
+        return AI_STATE.ROAM;
+      }
+      animal._hunting = true;
+      return AI_STATE.SEEK_PREY;
+    }
+    return AI_STATE.IDLE;
   }
 
   /** Soft clamp animals inside spawn/play region so they don't wander forever. */
@@ -1117,6 +1414,13 @@
     ALL_SPECIES,
     ADULT_AGE,
     BREED_COOLDOWN,
+    DAY_TICKS,
+    CALORIE_BURN_DIVISOR,
+    MIN_CALORIE_BURN,
+    PREDATOR_HUNT_RATIO,
+    PREDATOR_SATIATED_RATIO,
+    TERRITORY_RADIUS,
+    EGG_TIMER_BASE,
     createAnimal,
     updateAnimal,
     tickAnimal,
@@ -1127,5 +1431,6 @@
     isPredator,
     clampToRegion,
     applyDamage,
+    calorieBurnPerTick,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

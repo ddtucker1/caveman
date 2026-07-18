@@ -65,14 +65,80 @@ function assert(cond, msg) {
   assert(p.alive && p.x === 50 && p.calories === 10, 'plant respawns after delay');
 }
 
+// --- Unit: plant grass growth / off-grass wither ---
+{
+  const p = createPlant('grass', 0, 0);
+  p.calories = 20;
+  updatePlant(p, null, () => true);
+  assert(p.calories > 20, 'plant grows on grass');
+  const before = p.calories;
+  updatePlant(p, null, () => false);
+  assert(p.calories === before - Wildborn.plant.WITHER_PER_TICK, 'plant withers off grass by 0.1');
+}
+
 // --- Unit: animal factory ---
 {
   const rabbit = Wildborn.animal.createAnimal('rabbit', 0, 0);
   assert(rabbit.diet === 'herbivore' && rabbit.maxCalories === 60, 'rabbit herbivore stats');
   const wolf = Wildborn.animal.createAnimal('wolf', 0, 0);
   assert(wolf.diet === 'predator' && wolf.special === 'howl', 'wolf predator stats');
+  assert(wolf.state === 'ROAM', 'predators spawn in ROAM state');
+  assert(wolf.spawnX === 0 && wolf.spawnY === 0, 'predator records spawn territory point');
   const cub = Wildborn.animal.createAnimal('deer', 0, 0, { isOffspring: true });
   assert(!cub.isAdult && cub.calories === cub.maxCalories * 0.2, 'offspring start at 20% calories');
+}
+
+// --- Unit: calorie burn ÷10 and speed halve ---
+{
+  const wolf = Wildborn.animal.createAnimal('wolf', 0, 0);
+  const burn = Wildborn.animal.calorieBurnPerTick(wolf);
+  const original = 100 / 120; // caloriesNeededPerDay / DAY_TICKS
+  assert(burn < original * 0.2, 'wolf burn is much slower than original (' + burn + ' vs ' + original + ')');
+  assert(burn >= 0.05, 'burn stays positive');
+  assert(Wildborn.animal.SPEED.fast === 52.5, 'fast speed halved to 52.5');
+  assert(Wildborn.animal.SPEED.very_slow === 14, 'very_slow speed halved to 14');
+  assert(wolf.baseSpeed === 52.5, 'wolf baseSpeed uses halved fast');
+}
+
+// --- Unit: chicken egg timer 10× rarer ---
+{
+  const chicken = Wildborn.animal.createAnimal('chicken', 0, 0);
+  assert(chicken.eggTimer >= 500, 'chicken egg timer base ≥ 500 (was ~50)');
+  assert(Wildborn.animal.EGG_TIMER_BASE === 500, 'EGG_TIMER_BASE is 500');
+}
+
+// --- Unit: predator hunt threshold / satiation ---
+{
+  const wolf = Wildborn.animal.createAnimal('wolf', 100, 100);
+  const eggs = [];
+  const ctx = {
+    rng: createRng('hunt-test'),
+    tickSeconds: 0.5,
+    isWater: () => false,
+    findNearestPlant: () => null,
+    findNearestAnimal: () => null,
+    findNearestEgg: () => null,
+    hasEggFromChicken: () => false,
+    queryAnimals: () => [],
+    spawnPoop: () => {},
+    spawnSplash: () => {},
+  };
+  // Well-fed: stay roaming
+  wolf.calories = wolf.maxCalories * 0.9;
+  Wildborn.animal.updateAnimal(wolf, 0.1, ctx);
+  assert(wolf.state === 'ROAM', 'predator stays ROAM above 30% calories');
+
+  // Drop to hunt threshold
+  wolf.calories = wolf.maxCalories * 0.3;
+  Wildborn.animal.updateAnimal(wolf, 0.1, ctx);
+  assert(wolf.state === 'SEEK_PREY' && wolf._hunting, 'predator enters SEEK_PREY at ≤30%');
+
+  // Satiate to 80%
+  wolf.calories = wolf.maxCalories * 0.85;
+  wolf.state = 'SEEK_PREY';
+  wolf._hunting = true;
+  Wildborn.animal.updateAnimal(wolf, 0.1, ctx);
+  assert(wolf.state === 'ROAM' && !wolf._hunting, 'predator returns to ROAM at ≥80%');
 }
 
 // --- Unit: shape defs cover every species + renderShape is callable ---
@@ -171,6 +237,17 @@ function assert(cond, msg) {
   });
 
   assert(eco.plants.length === INITIAL_PLANT_COUNT, 'spawns 200 plants');
+
+  // Plants should be on grass tiles
+  let plantsOnGrass = 0;
+  for (const p of eco.plants) {
+    if (world.isGrass(world.getTileAtPixel(p.x, p.y))) plantsOnGrass++;
+  }
+  assert(plantsOnGrass === eco.plants.length, 'all plants spawned on grass (' + plantsOnGrass + '/' + eco.plants.length + ')');
+
+  // Predators start roaming (not hunting) when well-fed
+  const wolves = eco.animals.filter((a) => a.species === 'wolf');
+  assert(wolves.every((w) => w.state === 'ROAM'), 'well-fed wolves start in ROAM');
 
   const herbExpected = { rabbit: 10, deer: 8, cow: 6, raccoon: 5, bison: 4, chicken: 15, ostrich: 3, turtle: 5, lizard: 8 };
   const predExpected = { wolf: 4, lion: 3, panther: 2, bear: 2, alligator: 3 };

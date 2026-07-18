@@ -1,12 +1,13 @@
 /**
- * Phase 1 player: movable colored square with basic stats.
+ * Phase 1 player: movable caveman with basic stats.
  * Combat / inventory / crafting arrive in later phases.
  */
 (function (global) {
   const Wildborn = (global.Wildborn = global.Wildborn || {});
   const { TILE_SIZE } = Wildborn.world;
 
-  const PLAYER_SIZE = 20;
+  /** Hitbox / visual size — 50% larger than the original 20×20. */
+  const PLAYER_SIZE = 30;
   const BASE_SPEED = 140; // pixels per second
   const WATER_SPEED_MULT = 0.45;
 
@@ -21,6 +22,8 @@
       vy: 0,
       facingX: 1,
       facingY: 0,
+      /** Walk-cycle phase for limb swing (radians). */
+      walkPhase: 0,
 
       hp: 100,
       maxHp: 100,
@@ -81,6 +84,14 @@
 
     player.vx = dx * speed;
     player.vy = dy * speed;
+
+    const moving = Math.abs(player.vx) + Math.abs(player.vy) > 1;
+    if (moving) {
+      player.walkPhase += dt * 10;
+    } else {
+      // Ease limbs back toward rest
+      player.walkPhase *= 1 - Math.min(1, dt * 6);
+    }
   }
 
   function collidesWorld(x, y, w, h, world) {
