@@ -350,15 +350,6 @@
     for (let i = 0; i < animals.length; i++) {
       const a = animals[i];
       if (a.x < x0 || a.x > x1 || a.y < y0 || a.y > y1) continue;
-      // Panther stealth: invisible until close to camera center (player)
-      if (a.special === 'stealth' && a.alive && a.state !== 'DEAD') {
-        const cx = camera.x + camera.width / 2;
-        const cy = camera.y + camera.height / 2;
-        const dx = a.x - cx;
-        const dy = a.y - cy;
-        const reveal = a.stealthRevealDist || 120;
-        if (dx * dx + dy * dy > reveal * reveal) continue;
-      }
       drawAnimalSprite(ctx, a, camera, time, ecosystem);
     }
 
@@ -450,14 +441,6 @@
     const base = shapeDef ? shapeDef.size : animal.baseSize || animal.size;
     const scale = (animal.size / base) * ENTITY_VISUAL_SCALE;
 
-    if (animal.burrowed) {
-      ctx.fillStyle = 'rgba(80,60,40,0.5)';
-      ctx.beginPath();
-      ctx.ellipse(s.x, s.y, animal.size * 0.6, animal.size * 0.3, 0, 0, Math.PI * 2);
-      ctx.fill();
-      return;
-    }
-
     const facingRight = animal.vx >= 0;
     // Persist facing when stopped
     if (Math.abs(animal.vx) < 2 && animal._facingRight != null) {
@@ -477,15 +460,10 @@
       animal.target &&
       animal.target.kind === 'animal' &&
       animal.target.alive;
-    const stalking = hunting && animal.special === 'stealth';
     const fleeing = animal.state === 'FLEE' && !animal._counterAttack;
     const attacking =
       (animal.state === 'FLEE' && animal._counterAttack) ||
       (hunting && animal.attackCooldown > 0);
-    const roaring = animal.packCallTimer > 0 && animal.special === 'howl';
-    // Lion roar when calling pack (also female_hunt pack feel via packCallTimer)
-    const lionRoar =
-      animal.species === 'lion' && (animal.packCallTimer > 0 || animal._howlPulse);
     const rearUp =
       animal.species === 'bear' &&
       hunting &&
@@ -541,14 +519,14 @@
         moving: moving && !sleeping,
         speed: speed,
         hunting: hunting,
-        stalking: stalking,
+        stalking: false,
         fleeing: fleeing,
         attacking: attacking,
         eating: animal.state === 'EATING',
         eatBobPhase: animal.eatBobPhase || 0,
         eatLocked: !!animal.eatLocked,
         eatLockPhase: animal.eatLockPhase || 0,
-        roaring: roaring || lionRoar,
+        roaring: false,
         rearUp: rearUp,
         sleeping: sleeping,
         sleepTilt: animal.sleepTilt || 0,
@@ -726,15 +704,6 @@
     const animals = ecosystem.animals;
     for (let i = 0; i < animals.length; i++) {
       const a = animals[i];
-      // Respect panther stealth for picking
-      if (a.special === 'stealth' && a.alive && a.state !== 'DEAD') {
-        const cx = camera.x + camera.width / 2;
-        const cy = camera.y + camera.height / 2;
-        const dx = a.x - cx;
-        const dy = a.y - cy;
-        const reveal = a.stealthRevealDist || 120;
-        if (dx * dx + dy * dy > reveal * reveal) continue;
-      }
       const dx = a.x - worldX;
       const dy = a.y - worldY;
       const d2 = dx * dx + dy * dy;

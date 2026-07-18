@@ -294,7 +294,7 @@
      * without AI decisions or new A* searches.
      */
     function cheapMoveAnimal(animal, dt) {
-      if (animal.state === AI_STATE.DEAD || animal.burrowed) return;
+      if (animal.state === AI_STATE.DEAD) return;
       if (animal._path && animal._pathIndex < animal._path.length) {
         const wp = animal._path[animal._pathIndex];
         const dx = wp.x - animal.x;
