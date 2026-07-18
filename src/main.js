@@ -12,6 +12,7 @@
     createCamera,
     updateCamera,
     snapCamera,
+    clampCameraToMap,
   } = Wildborn.camera;
   const {
     clear,
@@ -22,6 +23,8 @@
     drawLegend,
     drawTooltip,
     drawMinimap,
+    getMinimapLayout,
+    getMinimapViewportRect,
     pickEntityAt,
     updateHud,
     setSeedDisplay,
@@ -57,6 +60,10 @@
     /** Entity currently shown in the inspector popup (follows entity). */
     inspectEntity: null,
     time: 0,
+    /** Global sim speed multiplier (1 or 3). */
+    speed: config.gameSpeed || 1,
+    /** Active minimap viewport drag (null when idle). */
+    minimapDrag: null,
   };
 
   // ---------------------------------------------------------------------------
@@ -142,8 +149,39 @@
   function resetCensusPosition() {
     if (!censusWindow) return;
     censusWindow.style.left = '';
-    censusWindow.style.top = '80px';
+    censusWindow.style.top = '112px';
     censusWindow.style.right = '12px';
+  }
+
+  // ---------------------------------------------------------------------------
+  // Game speed (3× toggle)
+  // ---------------------------------------------------------------------------
+
+  const btnSpeed = document.getElementById('btn-speed');
+
+  function syncSpeedButton() {
+    if (!btnSpeed) return;
+    const fast = game.speed >= 3;
+    btnSpeed.textContent = fast ? 'Speed 1×' : 'Speed 3×';
+    btnSpeed.classList.toggle('active', fast);
+    btnSpeed.title = fast ? 'Return to normal speed' : 'Run game at 3× speed';
+  }
+
+  function setGameSpeed(speed) {
+    game.speed = speed;
+    config.gameSpeed = speed;
+    syncSpeedButton();
+  }
+
+  function toggleGameSpeed() {
+    setGameSpeed(game.speed >= 3 ? 1 : 3);
+  }
+
+  if (btnSpeed) {
+    btnSpeed.addEventListener('click', function (e) {
+      e.preventDefault();
+      toggleGameSpeed();
+    });
   }
 
   function setCensusVisible(visible) {
@@ -444,6 +482,8 @@
     const dir = KEY_MAP[e.code];
     if (dir) {
       game.keys[dir] = true;
+      // Player movement re-centers the camera after a minimap pan.
+      if (game.camera) game.camera.followPlayer = true;
       e.preventDefault();
       return;
     }
@@ -486,10 +526,74 @@
     }
   });
 
+  function pointInRect(px, py, r) {
+    return px >= r.x && py >= r.y && px <= r.x + r.w && py <= r.y + r.h;
+  }
+
+  function applyMinimapCameraFromPointer(mx, my) {
+    if (!game.camera || !game.world || !game.minimapDrag) return;
+    const layout = getMinimapLayout(window.innerWidth, window.innerHeight, game.world);
+    const scale = layout.size / layout.mapPx;
+    const centerX = (mx - layout.x) / scale;
+    const centerY = (my - layout.y) / scale;
+    game.camera.x = centerX - game.minimapDrag.grabOffsetX / scale;
+    game.camera.y = centerY - game.minimapDrag.grabOffsetY / scale;
+    game.camera.followPlayer = false;
+    clampCameraToMap(game.camera, MAP_PIXEL_SIZE);
+  }
+
   canvas.addEventListener('mousemove', function (e) {
     const rect = canvas.getBoundingClientRect();
     game.mouseX = e.clientX - rect.left;
     game.mouseY = e.clientY - rect.top;
+
+    if (game.minimapDrag) {
+      applyMinimapCameraFromPointer(game.mouseX, game.mouseY);
+      // Grabbing the view rect — show move cursor
+      canvas.style.cursor = 'move';
+      return;
+    }
+
+    if (
+      state === 'playing' &&
+      config.showMinimap !== false &&
+      game.world &&
+      game.camera
+    ) {
+      const layout = getMinimapLayout(window.innerWidth, window.innerHeight, game.world);
+      const vp = getMinimapViewportRect(layout, game.camera);
+      canvas.style.cursor = pointInRect(game.mouseX, game.mouseY, vp)
+        ? 'move'
+        : 'crosshair';
+    }
+  });
+
+  canvas.addEventListener('mousedown', function (e) {
+    if (state !== 'playing' || config.showMinimap === false || !game.world || !game.camera) {
+      return;
+    }
+    if (e.button !== 0) return;
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const layout = getMinimapLayout(window.innerWidth, window.innerHeight, game.world);
+    const vp = getMinimapViewportRect(layout, game.camera);
+    if (!pointInRect(mx, my, vp)) return;
+
+    game.minimapDrag = {
+      grabOffsetX: mx - vp.x,
+      grabOffsetY: my - vp.y,
+    };
+    game.camera.followPlayer = false;
+    canvas.style.cursor = 'move';
+    e.preventDefault();
+  });
+
+  window.addEventListener('mouseup', function () {
+    if (game.minimapDrag) {
+      game.minimapDrag = null;
+      if (state === 'playing') canvas.style.cursor = 'crosshair';
+    }
   });
 
   canvas.addEventListener('click', function (e) {
@@ -497,6 +601,20 @@
     const rect = canvas.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
+
+    // Ignore clicks that started (or landed) on the minimap viewport / map area.
+    if (config.showMinimap !== false && game.world && game.camera) {
+      const layout = getMinimapLayout(window.innerWidth, window.innerHeight, game.world);
+      if (
+        mx >= layout.x &&
+        my >= layout.y &&
+        mx <= layout.x + layout.size &&
+        my <= layout.y + layout.size
+      ) {
+        return;
+      }
+    }
+
     const hit = pickEntityAt(game.ecosystem, game.camera, mx, my);
     if (hit) {
       openInspector(hit);
@@ -567,9 +685,13 @@
     updateHud(game.player);
 
     if (btnCensus) btnCensus.classList.remove('hidden');
+    if (btnSpeed) btnSpeed.classList.remove('hidden');
+    syncSpeedButton();
     resetCensusPosition();
     setCensusVisible(!!config.showCensus);
     closeInspector();
+    game.minimapDrag = null;
+    if (game.camera) game.camera.followPlayer = true;
 
     menuEl.classList.add('hidden');
     state = 'playing';
@@ -578,7 +700,8 @@
   }
 
   function update(dt) {
-    const step = Math.min(dt, 0.05);
+    // Cap raw frame dt, then apply global speed so 3× still stays stable.
+    const step = Math.min(dt, 0.05) * (game.speed || 1);
     game.time += step;
 
     updatePlayer(game.player, game.keys, step, game.world);
@@ -660,7 +783,7 @@
     }
 
     if (config.showMinimap !== false && game.world) {
-      drawMinimap(ctx, game.world, game.player, game.ecosystem, w, h);
+      drawMinimap(ctx, game.world, game.player, game.ecosystem, w, h, game.camera);
     }
   }
 

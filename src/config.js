@@ -59,5 +59,8 @@
 
     /** Show Ecosystem Census popup (also toggleable with Tab in-game). */
     showCensus: false,
+
+    /** Global simulation / movement speed multiplier (1 = normal, 3 = triple speed). */
+    gameSpeed: 1,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

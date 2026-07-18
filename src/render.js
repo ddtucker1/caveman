@@ -120,13 +120,6 @@
       ctx.lineTo(sx + 18, sy + 20);
       ctx.lineTo(sx + 6, sy + 22);
       ctx.fill();
-    } else if (tile === TILE.SAND) {
-      ctx.fillStyle = 'rgba(90,70,40,0.12)';
-      for (let i = 0; i < 4; i++) {
-        const h = hash2(tx + i * 3, ty + i);
-        ctx.fillRect(sx + h * 28, sy + hash2(ty, tx + i) * 28, 1.5, 1.5);
-      }
-    }
   }
 
   function drawRock(ctx, x, y, terrain, seed) {
@@ -944,17 +937,44 @@
     return _minimapEntities;
   }
 
-  /**
-   * Minimap of the full 400×400 grid (bottom-right).
-   * Terrain sample + player / plant / animal dots.
-   */
-  function drawMinimap(ctx, world, player, ecosystem, viewW, viewH) {
-    const mapTiles = world.MAP_TILES || Wildborn.world.MAP_TILES || 400;
-    const mapPx = world.MAP_PIXEL_SIZE || mapTiles * TILE_SIZE;
+  /** Layout of the bottom-right minimap in screen CSS pixels. */
+  function getMinimapLayout(viewW, viewH, world) {
+    const mapTiles =
+      (world && world.MAP_TILES) ||
+      (Wildborn.world && Wildborn.world.MAP_TILES) ||
+      400;
+    const mapPx =
+      (world && world.MAP_PIXEL_SIZE) ||
+      mapTiles * TILE_SIZE;
     const size = Math.min(160, Math.floor(Math.min(viewW, viewH) * 0.22));
     const pad = 10;
-    const x = viewW - size - pad;
-    const y = viewH - size - pad;
+    return {
+      x: viewW - size - pad,
+      y: viewH - size - pad,
+      size: size,
+      mapTiles: mapTiles,
+      mapPx: mapPx,
+    };
+  }
+
+  /** Screen-space rectangle of the camera viewport on the minimap. */
+  function getMinimapViewportRect(layout, camera) {
+    const scale = layout.size / layout.mapPx;
+    return {
+      x: layout.x + camera.x * scale,
+      y: layout.y + camera.y * scale,
+      w: Math.max(4, camera.width * scale),
+      h: Math.max(4, camera.height * scale),
+    };
+  }
+
+  /**
+   * Minimap of the full 400×400 grid (bottom-right).
+   * Terrain sample + player / plant / animal dots + camera viewport rect.
+   */
+  function drawMinimap(ctx, world, player, ecosystem, viewW, viewH, camera) {
+    const layout = getMinimapLayout(viewW, viewH, world);
+    const { x, y, size, mapTiles, mapPx } = layout;
 
     ctx.save();
     ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
@@ -984,6 +1004,19 @@
       ctx.stroke();
     }
 
+    // Current view rectangle (draggable)
+    if (camera) {
+      const vp = getMinimapViewportRect(layout, camera);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+      ctx.fillRect(vp.x, vp.y, vp.w, vp.h);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(vp.x + 0.5, vp.y + 0.5, Math.max(1, vp.w - 1), Math.max(1, vp.h - 1));
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(vp.x - 0.5, vp.y - 0.5, vp.w + 1, vp.h + 1);
+    }
+
     ctx.fillStyle = 'rgba(232, 228, 212, 0.85)';
     ctx.font = '10px monospace';
     ctx.fillText(mapTiles + '×' + mapTiles, x + 4, y + 12);
@@ -1000,6 +1033,8 @@
     drawLegend,
     drawTooltip,
     drawMinimap,
+    getMinimapLayout,
+    getMinimapViewportRect,
     pickEntityAt,
     updateHud,
     setSeedDisplay,
