@@ -139,7 +139,11 @@ function assert(cond, msg) {
 
 // --- Unit: eat rate / sight / water speed ---
 {
-  assert(Wildborn.animal.EAT_RATE_PER_SEC === 1, 'plant eat rate is 1 cal/sec/animal');
+  assert(Wildborn.animal.EAT_RATE_PER_SEC === 5, 'plant eat rate is 5 cal/sec/animal');
+  assert(
+    Wildborn.animal.PREDATOR_CALORIE_BURN_PER_SEC === 0.1,
+    'predators burn 0.1 cal/sec (1 every 10s)'
+  );
   assert(Wildborn.animal.EAT_RANGE === 20, 'eat range is 20px');
   assert(Wildborn.animal.PLANT_SIGHT_RANGE === 256, 'plant sight is 8 tiles (256px)');
   assert(Wildborn.animal.FOOD_DETECT_RANGE === 256, 'food detect matches plant sight');
@@ -162,19 +166,37 @@ function assert(cond, msg) {
   assert(!Wildborn.animal.AI_STATE.SEEK_MATE && !Wildborn.animal.AI_STATE.BREEDING, 'mate-seeking states removed');
 }
 
-// --- Unit: calorie burn ÷10 and speed halve ---
+// --- Unit: predator flat burn / herbivore ÷10 / speed halve ---
 {
+  const tickSec = Wildborn.config.ecosystemTickSeconds || 0.5;
+  const expectedPred = Wildborn.animal.PREDATOR_CALORIE_BURN_PER_SEC * tickSec;
+  const predIds = Object.keys(PREDATOR_SPECIES);
+  for (let i = 0; i < predIds.length; i++) {
+    const a = Wildborn.animal.createAnimal(predIds[i], 0, 0);
+    const burn = Wildborn.animal.calorieBurnPerTick(a);
+    assert(
+      Math.abs(burn - expectedPred) < 0.0001,
+      predIds[i] + ' burn is flat 0.1 cal/s (' + burn + ' /tick, expect ' + expectedPred + ')'
+    );
+  }
+  const rabbit = Wildborn.animal.createAnimal('rabbit', 0, 0);
+  const herbBurn = Wildborn.animal.calorieBurnPerTick(rabbit);
+  // Rabbit: 30/120/10 = 0.025 → floored to 0.1 (still the reduced herbivore path)
+  assert(
+    Math.abs(herbBurn - 0.1) < 0.0001,
+    'herbivore burn stays at reduced rate (' + herbBurn + ')'
+  );
+  assert(
+    !PREDATOR_SPECIES[rabbit.species],
+    'rabbit is not on the flat predator burn path'
+  );
   const wolf = Wildborn.animal.createAnimal('wolf', 0, 0);
-  const burn = Wildborn.animal.calorieBurnPerTick(wolf);
-  const original = 100 / 120; // caloriesNeededPerDay / DAY_TICKS
-  assert(burn < original * 0.2, 'wolf burn is much slower than original (' + burn + ' vs ' + original + ')');
-  assert(burn >= 0.05, 'burn stays positive');
   assert(Wildborn.animal.SPEED.fast === 52.5, 'fast speed halved to 52.5');
   assert(Wildborn.animal.SPEED.very_slow === 14, 'very_slow speed halved to 14');
   assert(wolf.baseSpeed === 52.5, 'wolf baseSpeed uses halved fast');
 }
 
-// --- Unit: real-time plant eating (1 cal/sec) ---
+// --- Unit: real-time plant eating (5 cal/sec, stacks) ---
 {
   const rabbit = Wildborn.animal.createAnimal('rabbit', 100, 100);
   const plant = createPlant('grass', 100, 100);
@@ -194,12 +216,12 @@ function assert(cond, msg) {
   ctx.world.ensureMapLoaded();
   Wildborn.animal.updateAnimal(rabbit, 1.0, ctx); // 1 second
   assert(
-    Math.abs(plant.calories - 49) < 0.01,
-    '1 animal eats 1 cal/sec (plant now ' + plant.calories + ')'
+    Math.abs(plant.calories - 45) < 0.01,
+    '1 animal eats 5 cal/sec (plant now ' + plant.calories + ')'
   );
-  assert(Math.abs(rabbit.calories - 11) < 0.01, 'animal gained 1 calorie');
+  assert(Math.abs(rabbit.calories - 15) < 0.01, 'animal gained 5 calories');
 
-  // 3 animals → 3 cal/sec
+  // 3 animals → 15 cal/sec
   plant.calories = 50;
   const eaters = [];
   for (let i = 0; i < 3; i++) {
@@ -213,8 +235,8 @@ function assert(cond, msg) {
     Wildborn.animal.updateAnimal(eaters[i], 1.0, ctx);
   }
   assert(
-    Math.abs(plant.calories - 47) < 0.05,
-    '3 animals eat 3 cal/sec (plant now ' + plant.calories + ')'
+    Math.abs(plant.calories - 35) < 0.05,
+    '3 animals eat 15 cal/sec (plant now ' + plant.calories + ')'
   );
 }
 
