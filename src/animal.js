@@ -55,7 +55,7 @@
       attackPower: 2,
       color: '#c8c0b0',
       size: 8,
-      corpseYield: 0.5,
+      corpseYield: 1,
     },
     deer: {
       id: 'deer',
@@ -70,7 +70,7 @@
       attackPower: 4,
       color: '#8a6238',
       size: 14,
-      corpseYield: 0.5,
+      corpseYield: 1,
     },
     cow: {
       id: 'cow',
@@ -86,7 +86,7 @@
       color: '#d8d0c0',
       accent: '#333',
       size: 18,
-      corpseYield: 0.5,
+      corpseYield: 1,
     },
     raccoon: {
       id: 'raccoon',
@@ -101,7 +101,7 @@
       attackPower: 8,
       color: '#6a6a6a',
       size: 10,
-      corpseYield: 0.5,
+      corpseYield: 1,
     },
     bison: {
       id: 'bison',
@@ -116,7 +116,7 @@
       attackPower: 25,
       color: '#5a4030',
       size: 20,
-      corpseYield: 0.55,
+      corpseYield: 1,
     },
     ostrich: {
       id: 'ostrich',
@@ -131,7 +131,7 @@
       attackPower: 18,
       color: '#b09060',
       size: 16,
-      corpseYield: 0.5,
+      corpseYield: 1,
     },
     turtle: {
       id: 'turtle',
@@ -148,7 +148,7 @@
       color: '#3a6a3a',
       accent: '#2a4a2a',
       size: 11,
-      corpseYield: 0.4,
+      corpseYield: 1,
     },
     lizard: {
       id: 'lizard',
@@ -163,7 +163,7 @@
       attackPower: 3,
       color: '#5a9a4a',
       size: 7,
-      corpseYield: 0.5,
+      corpseYield: 1,
     },
   };
 
@@ -182,7 +182,7 @@
       attackPower: 22,
       color: '#7a7a88',
       size: 13,
-      corpseYield: 0.5,
+      corpseYield: 1,
     },
     lion: {
       id: 'lion',
@@ -197,7 +197,7 @@
       attackPower: 30,
       color: '#c9a045',
       size: 17,
-      corpseYield: 0.5,
+      corpseYield: 1,
     },
     panther: {
       id: 'panther',
@@ -212,7 +212,7 @@
       attackPower: 28,
       color: '#1a1a22',
       size: 14,
-      corpseYield: 0.5,
+      corpseYield: 1,
     },
     bear: {
       id: 'bear',
@@ -227,7 +227,7 @@
       attackPower: 40,
       color: '#4a3020',
       size: 20,
-      corpseYield: 0.5,
+      corpseYield: 1,
     },
     alligator: {
       id: 'alligator',
@@ -243,7 +243,7 @@
       attackPower: 35,
       color: '#2a5a2a',
       size: 18,
-      corpseYield: 0.5,
+      corpseYield: 1,
     },
   };
 
@@ -433,7 +433,7 @@
       attackPower: def.attackPower || 5,
       defense: def.defense || 'flee',
       attackStyle: def.attackStyle || null,
-      corpseYield: def.corpseYield != null ? def.corpseYield : 0.5,
+      corpseYield: def.corpseYield != null ? def.corpseYield : 1,
 
       color: def.color,
       accent: def.accent || null,
@@ -966,6 +966,7 @@
     animal.health = 0;
     animal.vx = 0;
     animal.vy = 0;
+    // Dead bodies offer 100% of the animal's full calorie capacity to scavengers.
     animal.corpseCalories = animal.maxCalories * animal.corpseYield;
     animal.corpseDecay = 80; // ticks until corpse vanishes
     animal.deadAt = null; // render sets wall-clock time on first draw
@@ -1622,26 +1623,14 @@
       return;
     }
 
-    // Stubborn plant eating: commit until 100% full, plant depleted, or predator interrupt.
-    // Do NOT bail at the 60% hunger-return threshold mid-meal.
+    // Stubborn eating: commit until 100% full, food depleted, or (plants) predator interrupt.
+    // Do NOT bail at the 60% hunger-return threshold mid-meal — corpses and plants alike.
     if (eatingPlant) {
       const threat = findEatingPredatorThreat(animal, ctx);
       if (threat) {
         interruptEatingFlee(animal, threat);
         return;
       }
-    } else if (
-      animal._hungerSearch &&
-      !animal._hunting &&
-      hungerRatio(animal) >= HUNGER_RETURN_RATIO
-    ) {
-      // Non-plant food (corpse): keep prior hunger-return satiation
-      animal.target = null;
-      clearEatingVisuals(animal);
-      clearPath(animal);
-      clearHungerSearch(animal);
-      animal.state = defaultRestState(animal);
-      return;
     }
 
     // Stay near food (must be within 20px to eat plants)
@@ -1699,14 +1688,20 @@
       return;
     }
 
-    // Corpses: continuous transfer at a modest rate
+    // Corpses: continuous transfer until food runs out or eater reaches 100% calories.
     if (t.kind === 'animal' && t.state === AI_STATE.DEAD) {
       animal.eatLocked = false;
       const room = animal.maxCalories - animal.calories;
+      if (room <= 0) {
+        animal.target = null;
+        clearEatingVisuals(animal);
+        animal.state = postEatState(animal);
+        return;
+      }
       const eaten = Math.min(EAT_RATE_PER_SEC * 1.5 * dt, t.corpseCalories, room);
       t.corpseCalories -= eaten;
       animal.calories += eaten;
-      if (t.corpseCalories <= 0 || animal.calories >= animal.maxCalories * 0.95) {
+      if (t.corpseCalories <= 0 || animal.calories >= animal.maxCalories) {
         animal.target = null;
         clearEatingVisuals(animal);
         animal.state = postEatState(animal);
