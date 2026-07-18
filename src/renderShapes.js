@@ -157,7 +157,7 @@
     }
 
     // Idle breathing 1.0 → 1.02 over 2s
-    if (!moving && (state === 'IDLE' || state === 'BREEDING' || state === 'SLEEP')) {
+    if (!moving && (state === 'IDLE' || state === 'SLEEP')) {
       const breath = 1 + 0.02 * Math.sin((t / 2) * Math.PI * 2);
       sx = breath;
       sy = 2 - breath;
