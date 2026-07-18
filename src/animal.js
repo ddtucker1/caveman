@@ -1955,11 +1955,7 @@
     }
 
     // Asexual reproduction: calorie ≥ 80% and cooldown expired → spawn 1 offspring
-    // Ecosystem may block via canSpawnOffspring when at the soft population cap.
-    if (
-      canBreed(animal) &&
-      (!ctx.canSpawnOffspring || ctx.canSpawnOffspring())
-    ) {
+    if (canBreed(animal)) {
       result.offspring = breed(animal);
     }
 

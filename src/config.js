@@ -25,12 +25,6 @@
     spatialCellSize: 64,
 
     /**
-     * Soft population cap. Breeding is blocked once living animals reach this.
-     * Prevents unbounded pathfinding and AI cost as the food web grows.
-     */
-    maxAnimals: 120,
-
-    /**
      * Full AI + pathfinding within this distance (px) of the player focus.
      * Farther animals use cheap velocity integration most frames.
      */

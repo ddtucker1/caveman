@@ -6,7 +6,7 @@
   const Wildborn = (global.Wildborn = global.Wildborn || {});
   const { TILE_SIZE } = Wildborn.world;
 
-  /** Hitbox / visual size — 50% smaller than the previous 30×30. */
+  /** Invisible hitbox size (world px). Visual sprite is drawn larger in render.js. */
   const PLAYER_SIZE = 15;
   const BASE_SPEED = 140; // pixels per second
   const WATER_SPEED_MULT = 0.45;

@@ -279,16 +279,6 @@
       rebuildAnimalGrid();
     }
 
-    /** Count living (non-corpse) animals for the population soft-cap. */
-    function livingAnimalCount() {
-      let n = 0;
-      for (let i = 0; i < animals.length; i++) {
-        const a = animals[i];
-        if (a.alive && a.state !== AI_STATE.DEAD) n++;
-      }
-      return n;
-    }
-
     /**
      * Cheap far-LOD step: keep sliding along an existing path / velocity
      * without AI decisions or new A* searches.
@@ -352,10 +342,6 @@
         mapPixelSize: mapPixelSize,
         /** Decremented by animal pathfinding; 0 means reuse old paths this frame. */
         pathBudget: pathBudget,
-        /** Soft population cap gate used by tickAnimal before breed(). */
-        canSpawnOffspring: function () {
-          return livingAnimalCount() < (config.maxAnimals || 120);
-        },
         isWater: function (x, y) {
           return world.isSlow(world.getTileAtPixel(x, y));
         },
@@ -467,18 +453,14 @@
         p.ty = Math.floor(p.y / TILE_SIZE);
       }
 
-      // Animals
-      const maxAnimals = config.maxAnimals || 120;
-      let living = livingAnimalCount();
+      // Animals — no population cap; breeding limited by calories / cooldown / food web
       const newborns = [];
       const toRemove = [];
       for (let i = 0; i < animals.length; i++) {
         const result = tickAnimal(animals[i], ctx);
-        if (result.offspring && living < maxAnimals) {
+        if (result.offspring) {
           for (let k = 0; k < result.offspring.length; k++) {
-            if (living >= maxAnimals) break;
             newborns.push(result.offspring[k]);
-            living++;
           }
         }
         if (result.remove) toRemove.push(animals[i].id);
@@ -575,7 +557,6 @@
         poops: poops.length,
         animalTotal: animals.length,
         mapTiles: mapTiles,
-        maxAnimals: config.maxAnimals || 120,
       };
     }
 
