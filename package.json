@@ -2,17 +2,24 @@
   "name": "wildborn",
   "version": "1.0.0",
   "description": "Wildborn — procedurally evolving 2D survival (standalone desktop)",
+  "author": "Wildborn",
+  "desktopName": "Wildborn.desktop",
   "main": "electron/main.js",
   "private": true,
   "scripts": {
     "start": "electron .",
+    "play": "electron .",
     "test": "node test/ecosystem-smoke.js",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder"
+    "dist": "electron-builder",
+    "dist:linux": "electron-builder --linux AppImage",
+    "dist:win": "electron-builder --win portable",
+    "dist:mac": "electron-builder --mac dmg"
   },
   "build": {
     "appId": "com.wildborn.game",
     "productName": "Wildborn",
+    "artifactName": "${productName}-${version}-${os}.${ext}",
     "directories": {
       "output": "dist"
     },
@@ -23,14 +30,20 @@
       "package.json"
     ],
     "linux": {
-      "target": ["AppImage", "dir"],
-      "category": "Game"
+      "target": ["AppImage"],
+      "category": "Game",
+      "executableName": "Wildborn",
+      "syncDesktopName": true
     },
     "win": {
-      "target": ["portable", "dir"]
+      "target": ["portable"],
+      "executableName": "Wildborn"
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-portable.${ext}"
     },
     "mac": {
-      "target": ["dmg", "dir"],
+      "target": ["dmg"],
       "category": "public.app-category.games"
     }
   },
