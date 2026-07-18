@@ -2,7 +2,7 @@
  * Ecosystem animals — herbivores & predators with a shared state machine,
  * hunger, combat, grouping, and breeding.
  *
- * States: IDLE → SEEK_FOOD → EATING → FLEE → SEEK_MATE → BREEDING → DEAD
+ * States: IDLE → SEEK_FOOD → EATING → FLEE → SEEK_MATE → BREEDING → SLEEP → DEAD
  */
 (function (global) {
   const Wildborn = (global.Wildborn = global.Wildborn || {});
@@ -16,6 +16,7 @@
     SEEK_MATE: 'SEEK_MATE',
     BREEDING: 'BREEDING',
     ROAM: 'ROAM',
+    SLEEP: 'SLEEP',
     DEAD: 'DEAD',
   };
 
@@ -117,23 +118,6 @@
       size: 20,
       special: 'group_charge',
       corpseYield: 0.55,
-    },
-    chicken: {
-      id: 'chicken',
-      label: 'Chicken',
-      diet: 'herbivore',
-      maxGroupSize: 20,
-      speed: 'fast',
-      caloriesNeededPerDay: 25,
-      maxCalories: 50,
-      maxHealth: 20,
-      defense: 'flee',
-      attackPower: 1,
-      color: '#f0e8d0',
-      accent: '#c44',
-      size: 7,
-      special: 'eggs',
-      corpseYield: 0.5,
     },
     ostrich: {
       id: 'ostrich',
@@ -292,6 +276,10 @@
   const ATTACK_RANGE = 22;
   const MATE_RANGE = 28;
   const FLEE_DETECT_RANGE = 160;
+  /** Herbivores enter FLEE when a predator is within this range. */
+  const FLEE_ENTER_RANGE = 100;
+  /** Herbivores stop fleeing once the predator is this far away. */
+  const FLEE_SAFE_RANGE = 200;
   const FOOD_DETECT_RANGE = 320;
   const PACK_JOIN_RANGE = 200;
   const STEAL_RANGE = 24;
@@ -308,13 +296,29 @@
   const WATER_DESPERATION_FLEE_DIST = 100;
   /** Starvation desperation: cross water below this calorie ratio. */
   const WATER_DESPERATION_STARVE_RATIO = 0.2;
-  /** Chicken egg interval was ~50–90 ticks; 10× rarer → ~500–900. */
-  const EGG_TIMER_BASE = 500;
-  const EGG_TIMER_JITTER = 400;
   /** Poop while roaming: every 5–10s, fade after 30s. */
   const POOP_INTERVAL_MIN = 5;
   const POOP_INTERVAL_MAX = 10;
   const POOP_FADE_SECONDS = 30;
+
+  /** Stamina — shared across all species. */
+  const STAMINA_MAX = 100;
+  const STAMINA_REGEN = 2;
+  const STAMINA_DRAIN_WALK = 0.5;
+  const STAMINA_DRAIN_FLEE = 3;
+  const STAMINA_DRAIN_HUNT = 2;
+  const STAMINA_PANT_THRESHOLD = 20;
+
+  /** Sleep / nap. */
+  const SLEEP_ENTER_RATIO = 0.8;
+  const SLEEP_WAKE_RATIO = 0.7;
+  const SLEEP_IDLE_SECONDS = 5;
+  const SLEEP_MIN_SECONDS = 10;
+  const SLEEP_MAX_SECONDS = 60;
+  const SLEEP_WAKE_PREDATOR_RANGE = 150;
+  const SLEEP_WAKE_FOOD_RANGE = 100;
+  const SLEEP_RANDOM_WAKE_CHANCE = 0.02;
+  const SLEEP_TILT_SECONDS = 1;
 
   let nextAnimalId = 1;
 
@@ -360,6 +364,8 @@
       caloriesNeededPerDay: def.caloriesNeededPerDay,
       health: isOffspring ? def.maxHealth * 0.4 : def.maxHealth,
       maxHealth: def.maxHealth,
+      stamina: STAMINA_MAX,
+      maxStamina: STAMINA_MAX,
 
       age: isOffspring ? 0 : ADULT_AGE + Math.floor(Math.random() * 20),
       breedingCooldown: isOffspring ? BREED_COOLDOWN : Math.floor(Math.random() * 40),
@@ -371,6 +377,17 @@
       target: null,
       mateTarget: null,
       fleeFrom: null,
+      /** Accumulated seconds in IDLE/ROAM toward nap. */
+      idleAccum: 0,
+      /** Seconds spent in current nap. */
+      sleepTimer: 0,
+      /** Visual lie-down tilt 0 → π/2. */
+      sleepTilt: 0,
+      /** Zzz particle list for sleep visuals. */
+      zzzParticles: [],
+      _zzzSpawn: 0,
+      /** Herbivore flee exhausted (walk instead of run). */
+      _fleeExhausted: false,
 
       groupId: opts.groupId != null ? opts.groupId : 0,
       maxGroupSize: def.maxGroupSize,
@@ -398,10 +415,6 @@
       packCallTimer: 0, // seconds remaining for pack to join
       burrowed: false,
       burrowTimer: 0,
-      eggTimer:
-        def.special === 'eggs'
-          ? EGG_TIMER_BASE + Math.floor(Math.random() * EGG_TIMER_JITTER)
-          : 0,
       /** Seconds until next visual poop while roaming (predators). */
       poopTimer: isPred ? 5 + Math.random() * 5 : 0,
 
@@ -443,10 +456,41 @@
       a.isAdult &&
       a.state !== AI_STATE.DEAD &&
       a.state !== AI_STATE.FLEE &&
+      a.state !== AI_STATE.SLEEP &&
       a.breedingCooldown <= 0 &&
       a.calories > a.maxCalories * BREED_CALORIE_RATIO &&
       a.state !== AI_STATE.BREEDING
     );
+  }
+
+  function defaultRestState(animal) {
+    return isPredator(animal) && animal.diet !== 'herbivore'
+      ? AI_STATE.ROAM
+      : AI_STATE.IDLE;
+  }
+
+  function enterSleep(animal) {
+    animal.state = AI_STATE.SLEEP;
+    animal.vx = 0;
+    animal.vy = 0;
+    animal.target = null;
+    animal.mateTarget = null;
+    animal.fleeFrom = null;
+    animal.idleAccum = 0;
+    animal.sleepTimer = 0;
+    animal.sleepTilt = 0;
+    animal._zzzSpawn = 0;
+    animal.zzzParticles = [];
+    animal._fleeExhausted = false;
+  }
+
+  function wakeAnimal(animal) {
+    animal.state = defaultRestState(animal);
+    animal.sleepTimer = 0;
+    animal.sleepTilt = 0;
+    animal.zzzParticles = [];
+    animal._zzzSpawn = 0;
+    animal.idleAccum = 0;
   }
 
   function hungerRatio(a) {
@@ -638,6 +682,7 @@
       target.state = AI_STATE.FLEE;
       target.fleeFrom = attacker;
       target.stateTimer = 2.5;
+      target._fleeExhausted = target.stamina <= 0;
       if (target.special === 'burrow' && Math.random() < 0.4) {
         target.burrowed = true;
         target.burrowTimer = 3;
@@ -690,8 +735,8 @@
     }
     parentA.breedingCooldown = BREED_COOLDOWN;
     parentB.breedingCooldown = BREED_COOLDOWN;
-    parentA.state = isPredator(parentA) ? AI_STATE.ROAM : AI_STATE.IDLE;
-    parentB.state = isPredator(parentB) ? AI_STATE.ROAM : AI_STATE.IDLE;
+    parentA.state = defaultRestState(parentA);
+    parentB.state = defaultRestState(parentB);
     parentA.mateTarget = null;
     parentB.mateTarget = null;
     parentA.calories *= 0.85;
@@ -743,7 +788,7 @@
     }
 
     // Predator hunger gate: hunt only at ≤30%, roam above that until 80% after a hunt
-    if (isPredator(animal) && animal.diet !== 'herbivore') {
+    if (isPredator(animal) && animal.diet !== 'herbivore' && animal.state !== AI_STATE.SLEEP) {
       updatePredatorHungerGate(animal);
     }
 
@@ -756,23 +801,31 @@
         break;
       case AI_STATE.SEEK_FOOD:
       case AI_STATE.SEEK_PREY:
+        animal.idleAccum = 0;
         updateSeekFood(animal, dt, ctx);
         break;
       case AI_STATE.EATING:
+        animal.idleAccum = 0;
         updateEating(animal, dt, ctx);
         break;
       case AI_STATE.FLEE:
+        animal.idleAccum = 0;
         updateFlee(animal, dt, ctx);
         break;
       case AI_STATE.SEEK_MATE:
+        animal.idleAccum = 0;
         updateSeekMate(animal, dt, ctx);
         break;
       case AI_STATE.BREEDING:
+        animal.idleAccum = 0;
         // Brief pause while breeding resolves on tick
         animal.stateTimer -= dt;
         if (animal.stateTimer <= 0) {
-          animal.state = isPredator(animal) ? AI_STATE.ROAM : AI_STATE.IDLE;
+          animal.state = defaultRestState(animal);
         }
+        break;
+      case AI_STATE.SLEEP:
+        updateSleep(animal, dt, ctx);
         break;
       default:
         wander(animal, dt, ctx.rng, ctx);
@@ -785,7 +838,7 @@
    */
   function updatePredatorHungerGate(animal) {
     const ratio = hungerRatio(animal);
-    if (animal.state === AI_STATE.DEAD || animal.state === AI_STATE.FLEE) return;
+    if (animal.state === AI_STATE.DEAD || animal.state === AI_STATE.FLEE || animal.state === AI_STATE.SLEEP) return;
     if (animal.state === AI_STATE.BREEDING || animal.state === AI_STATE.SEEK_MATE) return;
 
     if (animal.state === AI_STATE.SEEK_PREY || animal.state === AI_STATE.SEEK_FOOD || animal.state === AI_STATE.EATING) {
@@ -813,14 +866,26 @@
   function updateRoam(animal, dt, ctx) {
     // Drop into hunt immediately if calories crossed the threshold mid-frame
     if (hungerRatio(animal) <= PREDATOR_HUNT_RATIO) {
+      animal.idleAccum = 0;
       animal.state = AI_STATE.SEEK_PREY;
       animal.target = null;
       animal._hunting = true;
       return;
     }
 
+    // Nap when satiated and roaming long enough (predator idle equivalent)
+    animal.idleAccum = (animal.idleAccum || 0) + dt;
+    if (
+      hungerRatio(animal) >= SLEEP_ENTER_RATIO &&
+      animal.idleAccum >= SLEEP_IDLE_SECONDS
+    ) {
+      enterSleep(animal);
+      return;
+    }
+
     // Occasional breeding while satiated
     if (canBreed(animal) && animal.isAdult && ctx.rng.chance(0.02 * dt)) {
+      animal.idleAccum = 0;
       animal.state = AI_STATE.SEEK_MATE;
       animal.mateTarget = null;
       return;
@@ -857,36 +922,159 @@
       const threat = ctx.findNearestAnimal(
         animal.x,
         animal.y,
-        FLEE_DETECT_RANGE,
+        FLEE_ENTER_RANGE,
         function (o) {
           return o.alive && isPredator(o) && o.diet !== 'herbivore' && o.id !== animal.id;
         }
       );
-      if (threat && (animal.diet === 'herbivore' || animal.special === 'runs_from_all')) {
-        // Ostriches run from everything predatory; bears don't flee as herbivores
-        if (animal.diet === 'herbivore') {
-          animal.state = AI_STATE.FLEE;
-          animal.fleeFrom = threat;
-          animal.stateTimer = 2.5;
-          if (animal.special === 'alert') animal._alertPulse = true;
-          return;
-        }
+      if (threat && animal.diet === 'herbivore') {
+        animal.idleAccum = 0;
+        animal.state = AI_STATE.FLEE;
+        animal.fleeFrom = threat;
+        animal.stateTimer = 2.5;
+        animal._fleeExhausted = animal.stamina <= 0;
+        if (animal.special === 'alert') animal._alertPulse = true;
+        return;
       }
     }
 
     if (isHungry(animal) || hungerRatio(animal) < 0.55) {
+      animal.idleAccum = 0;
       animal.state = AI_STATE.SEEK_FOOD;
       animal.target = null;
       return;
     }
 
     if (canBreed(animal) && animal.isAdult) {
+      animal.idleAccum = 0;
       animal.state = AI_STATE.SEEK_MATE;
       animal.mateTarget = null;
       return;
     }
 
+    // Nap when full and idle long enough
+    animal.idleAccum = (animal.idleAccum || 0) + dt;
+    if (
+      hungerRatio(animal) >= SLEEP_ENTER_RATIO &&
+      animal.idleAccum >= SLEEP_IDLE_SECONDS
+    ) {
+      enterSleep(animal);
+      return;
+    }
+
     wander(animal, dt, ctx.rng, ctx);
+  }
+
+  function updateSleep(animal, dt, ctx) {
+    animal.vx = 0;
+    animal.vy = 0;
+    animal.sleepTimer = (animal.sleepTimer || 0) + dt;
+
+    // Lie on side over 1 second
+    animal.sleepTilt = Math.min(
+      Math.PI / 2,
+      (animal.sleepTilt || 0) + (Math.PI / 2) * (dt / SLEEP_TILT_SECONDS)
+    );
+
+    // Zzz particles: 1 per second, fade after 2 seconds
+    animal._zzzSpawn = (animal._zzzSpawn || 0) - dt;
+    if (!animal.zzzParticles) animal.zzzParticles = [];
+    if (animal._zzzSpawn <= 0) {
+      animal._zzzSpawn = 1;
+      animal.zzzParticles.push({
+        x: 4 + Math.random() * 6,
+        y: -animal.size * 0.5,
+        life: 2,
+        maxLife: 2,
+      });
+    }
+    for (let i = animal.zzzParticles.length - 1; i >= 0; i--) {
+      const z = animal.zzzParticles[i];
+      z.life -= dt;
+      z.y -= 10 * dt;
+      z.x += 4 * dt;
+      if (z.life <= 0) animal.zzzParticles.splice(i, 1);
+    }
+
+    // Forced max nap
+    if (animal.sleepTimer >= SLEEP_MAX_SECONDS) {
+      wakeAnimal(animal);
+      return;
+    }
+
+    // Wake checks only after minimum nap
+    if (animal.sleepTimer < SLEEP_MIN_SECONDS) return;
+
+    if (hungerRatio(animal) < SLEEP_WAKE_RATIO) {
+      wakeAnimal(animal);
+      return;
+    }
+
+    const threat = ctx.findNearestAnimal(
+      animal.x,
+      animal.y,
+      SLEEP_WAKE_PREDATOR_RANGE,
+      function (o) {
+        return o.alive && isPredator(o) && o.diet !== 'herbivore' && o.id !== animal.id;
+      }
+    );
+    if (threat) {
+      wakeAnimal(animal);
+      if (animal.diet === 'herbivore') {
+        animal.state = AI_STATE.FLEE;
+        animal.fleeFrom = threat;
+        animal.stateTimer = 2.5;
+        animal._fleeExhausted = animal.stamina <= 0;
+      }
+      return;
+    }
+
+    // Food wake: prey/plants within 100px. Plants are dense after the overhaul,
+    // so herbivores only react once below satiation; predators always notice prey.
+    const food = findNearbyWakeFood(animal, ctx);
+    if (food) {
+      wakeAnimal(animal);
+      animal.target = food;
+      if (isPredator(animal) && food.kind === 'animal' && food.alive) {
+        animal.state = AI_STATE.SEEK_PREY;
+        animal._hunting = true;
+      } else {
+        animal.state = AI_STATE.SEEK_FOOD;
+      }
+      return;
+    }
+
+    // Random wake chance checked on discrete ticks (see tickAnimal)
+  }
+
+  function findNearbyWakeFood(animal, ctx) {
+    if (isPredator(animal) && animal.diet !== 'herbivore') {
+      const prey = ctx.findNearestAnimal(
+        animal.x,
+        animal.y,
+        SLEEP_WAKE_FOOD_RANGE,
+        function (o) {
+          return o.alive && o.diet === 'herbivore' && o.id !== animal.id;
+        }
+      );
+      if (prey) return prey;
+    }
+    // Herbivores: only wake for plants once no longer fully satiated
+    if (
+      (animal.diet === 'herbivore' || animal.diet === 'omnivore') &&
+      hungerRatio(animal) < SLEEP_ENTER_RATIO
+    ) {
+      const plant = ctx.findNearestPlant(
+        animal.x,
+        animal.y,
+        SLEEP_WAKE_FOOD_RANGE,
+        function (p) {
+          return p.alive && p.calories > 0;
+        }
+      );
+      if (plant) return plant;
+    }
+    return null;
   }
 
   function updateSeekFood(animal, dt, ctx) {
@@ -902,7 +1090,7 @@
         return;
       }
       if (!isHungry(animal) && hungerRatio(animal) > 0.6) {
-        animal.state = isPredator(animal) ? AI_STATE.ROAM : AI_STATE.IDLE;
+        animal.state = defaultRestState(animal);
       }
       return;
     }
@@ -952,8 +1140,6 @@
       if (animal.special === 'steal' && t.id !== animal.id && t.calories > 5) return true;
       return false;
     }
-    // Eggs as food source
-    if (t.kind === 'egg') return t.calories > 0;
     return false;
   }
 
@@ -1033,12 +1219,6 @@
         }
       );
       if (plant) return plant;
-
-      // Eggs
-      if (ctx.findNearestEgg) {
-        const egg = ctx.findNearestEgg(animal.x, animal.y, FOOD_DETECT_RANGE);
-        if (egg) return egg;
-      }
     }
 
     return null;
@@ -1115,7 +1295,7 @@
       } else if (isHungry(animal)) {
         animal.state = AI_STATE.SEEK_FOOD;
       } else {
-        animal.state = isPredator(animal) ? AI_STATE.ROAM : AI_STATE.IDLE;
+        animal.state = defaultRestState(animal);
       }
       return;
     }
@@ -1138,7 +1318,7 @@
         animal.calories += stolen;
       }
       if (animal.calories >= animal.maxCalories * 0.95 || t.calories < 5) {
-        animal.state = AI_STATE.IDLE;
+        animal.state = defaultRestState(animal);
         animal.target = null;
       }
       return;
@@ -1162,15 +1342,61 @@
       }
       if (animal.stateTimer <= 0) {
         animal._counterAttack = false;
-        animal.state = isPredator(animal) ? AI_STATE.ROAM : AI_STATE.IDLE;
+        animal.state = defaultRestState(animal);
       }
       return;
     }
 
     const threat = animal.fleeFrom;
-    if (!threat || !threat.alive || animal.stateTimer <= 0) {
+    if (!threat || !threat.alive) {
       animal.fleeFrom = null;
-      animal.state = isPredator(animal) ? AI_STATE.ROAM : AI_STATE.IDLE;
+      animal._fleeExhausted = false;
+      animal.state = defaultRestState(animal);
+      return;
+    }
+
+    const dist = Math.hypot(animal.x - threat.x, animal.y - threat.y);
+
+    // Herbivores: keep fleeing until predator is 200px+ away (stamina-gated speed)
+    if (animal.diet === 'herbivore') {
+      if (dist >= FLEE_SAFE_RANGE) {
+        animal.fleeFrom = null;
+        animal._fleeExhausted = false;
+        animal.state = AI_STATE.IDLE;
+        return;
+      }
+      if (animal.stamina <= 0) animal._fleeExhausted = true;
+
+      const dx = animal.x - threat.x;
+      const dy = animal.y - threat.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const runMult = animal.special === 'runs_from_all' ? 1.3 : 1.15;
+      // Exhausted: walk at half max flee speed
+      const speedMult = animal._fleeExhausted ? runMult * 0.5 : runMult;
+      const tx = animal.x + (dx / len) * 80;
+      const ty = animal.y + (dy / len) * 80;
+      moveToward(animal, tx, ty, dt, speedMult, ctx);
+
+      if (animal._alertPulse) {
+        animal._alertPulse = false;
+        const herd = ctx.queryAnimals(animal.x, animal.y, FLEE_DETECT_RANGE);
+        for (let i = 0; i < herd.length; i++) {
+          const m = herd[i];
+          if (m.alive && m.species === animal.species && m.id !== animal.id) {
+            m.state = AI_STATE.FLEE;
+            m.fleeFrom = threat;
+            m.stateTimer = 2.5;
+            m._fleeExhausted = m.stamina <= 0;
+          }
+        }
+      }
+      return;
+    }
+
+    // Non-herbivore flee (timer-based)
+    if (animal.stateTimer <= 0) {
+      animal.fleeFrom = null;
+      animal.state = defaultRestState(animal);
       return;
     }
 
@@ -1181,25 +1407,11 @@
     const tx = animal.x + (dx / len) * 80;
     const ty = animal.y + (dy / len) * 80;
     moveToward(animal, tx, ty, dt, fleeSpeed, ctx);
-
-    // Deer alert: mark nearby deer to flee
-    if (animal._alertPulse) {
-      animal._alertPulse = false;
-      const herd = ctx.queryAnimals(animal.x, animal.y, FLEE_DETECT_RANGE);
-      for (let i = 0; i < herd.length; i++) {
-        const m = herd[i];
-        if (m.alive && m.species === animal.species && m.id !== animal.id) {
-          m.state = AI_STATE.FLEE;
-          m.fleeFrom = threat;
-          m.stateTimer = 2.5;
-        }
-      }
-    }
   }
 
   function updateSeekMate(animal, dt, ctx) {
     if (!canBreed(animal)) {
-      animal.state = isPredator(animal) ? AI_STATE.ROAM : AI_STATE.IDLE;
+      animal.state = defaultRestState(animal);
       animal.mateTarget = null;
       return;
     }
@@ -1252,9 +1464,56 @@
   // ---------------------------------------------------------------------------
 
   /**
+   * Per-tick stamina drain/regen based on activity.
+   * Walking/idle/eating/sleeping regenerate; flee/hunt drain.
+   */
+  function updateStamina(animal) {
+    let drain = 0;
+    let regen = 0;
+    const state = animal.state;
+    const speed = Math.hypot(animal.vx || 0, animal.vy || 0);
+    const moving = speed > 2;
+
+    if (state === AI_STATE.SLEEP || state === AI_STATE.EATING) {
+      regen = STAMINA_REGEN;
+      drain = 0;
+    } else if (state === AI_STATE.FLEE && animal.diet === 'herbivore') {
+      if (animal._fleeExhausted || animal.stamina <= 0) {
+        // Exhausted walk-away: walk rates
+        regen = STAMINA_REGEN;
+        drain = STAMINA_DRAIN_WALK;
+        animal._fleeExhausted = true;
+      } else {
+        // Full sprint flee — predators are exempt (herbivores only)
+        regen = 0;
+        drain = STAMINA_DRAIN_FLEE;
+      }
+    } else if (state === AI_STATE.SEEK_PREY || (state === AI_STATE.SEEK_FOOD && isPredator(animal) && animal._hunting)) {
+      regen = 0;
+      drain = STAMINA_DRAIN_HUNT;
+    } else if (state === AI_STATE.IDLE || state === AI_STATE.ROAM || state === AI_STATE.BREEDING) {
+      regen = STAMINA_REGEN;
+      drain = moving ? STAMINA_DRAIN_WALK : 0;
+    } else if (state === AI_STATE.SEEK_FOOD || state === AI_STATE.SEEK_MATE) {
+      regen = STAMINA_REGEN;
+      drain = moving ? STAMINA_DRAIN_WALK : 0;
+    } else {
+      regen = STAMINA_REGEN;
+    }
+
+    animal.stamina = Math.max(
+      0,
+      Math.min(animal.maxStamina, animal.stamina + regen - drain)
+    );
+    if (animal.stamina <= 0 && state === AI_STATE.FLEE && animal.diet === 'herbivore') {
+      animal._fleeExhausted = true;
+    }
+  }
+
+  /**
    * @param {object} animal
    * @param {object} ctx
-   * @returns {{ offspring?: object[], eggs?: object[], remove?: boolean }}
+   * @returns {{ offspring?: object[], remove?: boolean }}
    */
   function tickAnimal(animal, ctx) {
     const result = {};
@@ -1269,8 +1528,12 @@
     }
 
     // Hunger drain: daily need / DAY_TICKS, then ÷10, min 0.5 cal/tick
-    const drain = calorieBurnPerTick(animal);
+    // Sleeping: conservation mode — half burn
+    let drain = calorieBurnPerTick(animal);
+    if (animal.state === AI_STATE.SLEEP) drain *= 0.5;
     animal.calories -= drain;
+
+    updateStamina(animal);
 
     // Age / growth
     animal.age += 1;
@@ -1291,28 +1554,13 @@
       animal.health = Math.min(animal.maxHealth, animal.health + animal.regenPerTick);
     }
 
-    // Chicken eggs — 1/10th prior rate; max 1 uneaten egg per chicken on screen
-    if (animal.special === 'eggs' && animal.isAdult && animal.alive) {
-      animal.eggTimer -= 1;
-      if (animal.eggTimer <= 0) {
-        const hasEgg =
-          ctx.hasEggFromChicken && ctx.hasEggFromChicken(animal.id);
-        if (!hasEgg) {
-          result.eggs = result.eggs || [];
-          result.eggs.push({
-            kind: 'egg',
-            id: 'egg-' + animal.id + '-' + animal.age,
-            chickenId: animal.id,
-            x: animal.x + ctx.rng.range(-6, 6),
-            y: animal.y + ctx.rng.range(-6, 6),
-            calories: 15,
-            color: '#f5f0e0',
-            size: 4,
-            decay: 60,
-          });
-        }
-        animal.eggTimer = EGG_TIMER_BASE + ctx.rng.int(0, EGG_TIMER_JITTER);
-      }
+    // Sleep: random wake chance after minimum nap
+    if (
+      animal.state === AI_STATE.SLEEP &&
+      animal.sleepTimer >= SLEEP_MIN_SECONDS &&
+      ctx.rng.chance(SLEEP_RANDOM_WAKE_CHANCE)
+    ) {
+      wakeAnimal(animal);
     }
 
     // Eating on tick
@@ -1334,14 +1582,6 @@
         t.corpseCalories -= eaten;
         animal.calories += eaten;
         if (t.corpseCalories <= 0 || animal.calories >= animal.maxCalories * 0.95) {
-          animal.target = null;
-          animal.state = postEatState(animal);
-        }
-      } else if (t.kind === 'egg') {
-        const eaten = Math.min(EAT_RATE, t.calories, room);
-        t.calories -= eaten;
-        animal.calories += eaten;
-        if (t.calories <= 0 || animal.calories >= animal.maxCalories * 0.95) {
           animal.target = null;
           animal.state = postEatState(animal);
         }
@@ -1373,7 +1613,7 @@
         animal._readyToBreed = false;
         animal.mateTarget = null;
         if (animal.alive) {
-          animal.state = isPredator(animal) ? AI_STATE.ROAM : AI_STATE.IDLE;
+          animal.state = defaultRestState(animal);
         }
       }
     }
@@ -1420,7 +1660,19 @@
     PREDATOR_HUNT_RATIO,
     PREDATOR_SATIATED_RATIO,
     TERRITORY_RADIUS,
-    EGG_TIMER_BASE,
+    STAMINA_MAX,
+    STAMINA_REGEN,
+    STAMINA_DRAIN_WALK,
+    STAMINA_DRAIN_FLEE,
+    STAMINA_DRAIN_HUNT,
+    STAMINA_PANT_THRESHOLD,
+    FLEE_ENTER_RANGE,
+    FLEE_SAFE_RANGE,
+    SLEEP_ENTER_RATIO,
+    SLEEP_WAKE_RATIO,
+    SLEEP_IDLE_SECONDS,
+    SLEEP_MIN_SECONDS,
+    SLEEP_MAX_SECONDS,
     createAnimal,
     updateAnimal,
     tickAnimal,
@@ -1432,5 +1684,7 @@
     clampToRegion,
     applyDamage,
     calorieBurnPerTick,
+    enterSleep,
+    wakeAnimal,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

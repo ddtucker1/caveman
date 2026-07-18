@@ -327,21 +327,6 @@
       ctx.fillRect(s.x - 1, s.y - 1, 3, 3);
     }
 
-    const eggs = ecosystem.eggs;
-    for (let i = 0; i < eggs.length; i++) {
-      const e = eggs[i];
-      if (e.x < x0 || e.x > x1 || e.y < y0 || e.y > y1) continue;
-      const s = worldToScreen(camera, e.x, e.y);
-      ctx.fillStyle = 'rgba(0,0,0,0.1)';
-      ctx.beginPath();
-      ctx.ellipse(s.x, s.y + 3, 4, 2, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = e.color || '#f5f0e0';
-      ctx.beginPath();
-      ctx.ellipse(s.x, s.y, e.size || 4, (e.size || 4) * 1.2, 0, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
     const animals = ecosystem.animals;
     // Pass 1: hunt lines under sprites (hover/debug only)
     if (showHuntLines || view.hoverEntity) {
@@ -480,12 +465,15 @@
       animal.stateTimer != null &&
       (animal.state === 'SEEK_FOOD' || animal.state === 'SEEK_PREY') &&
       (Math.floor(time * 2) % 5 === 0);
-    const sleeping =
+    const sleeping = animal.alive && animal.state === 'SLEEP';
+    const pantThreshold =
+      (Wildborn.animal && Wildborn.animal.STAMINA_PANT_THRESHOLD) || 20;
+    const panting =
       animal.alive &&
-      (animal.diet === 'predator' || animal.diet === 'omnivore') &&
-      (animal.state === 'IDLE' || animal.state === 'ROAM') &&
-      !moving &&
-      animal.calories > animal.maxCalories * 0.7;
+      animal.diet === 'herbivore' &&
+      animal.state === 'FLEE' &&
+      !animal._counterAttack &&
+      (animal.stamina == null || animal.stamina < pantThreshold);
 
     // Eye look toward nearest threat (herbivore) or food/prey
     let lookX = face ? 0.5 : -0.5;
@@ -518,10 +506,12 @@
         state: animal.state,
         calories: animal.calories,
         maxCalories: animal.maxCalories,
+        stamina: animal.stamina != null ? animal.stamina : 100,
+        maxStamina: animal.maxStamina != null ? animal.maxStamina : 100,
         id: animal.id,
         sex: animal.sex,
         isAdult: animal.isAdult,
-        moving: moving,
+        moving: moving && !sleeping,
         speed: speed,
         hunting: hunting,
         stalking: stalking,
@@ -531,6 +521,9 @@
         roaring: roaring || lionRoar,
         rearUp: rearUp,
         sleeping: sleeping,
+        sleepTilt: animal.sleepTilt || 0,
+        zzzParticles: animal.zzzParticles || null,
+        panting: panting,
         inWater: !!animal._inWater,
         counterAttack: !!animal._counterAttack,
         lookX: lookX,
@@ -569,8 +562,18 @@
       if (p.alive) plantCounts[p.species] = (plantCounts[p.species] || 0) + 1;
     }
 
+    let plantsAliveTotal = 0;
+    for (const id in plantCounts) plantsAliveTotal += plantCounts[id];
+    const plantsMax =
+      (stats && stats.plantsMax) ||
+      (Wildborn.ecosystem && Wildborn.ecosystem.INITIAL_PLANT_COUNT) ||
+      2000;
+
     const rows = [];
-    rows.push({ header: 'PLANTS', color: shared.legendColors.plant });
+    rows.push({
+      header: 'PLANTS ' + plantsAliveTotal + '/' + plantsMax,
+      color: shared.legendColors.plant,
+    });
     for (let i = 0; i < plants.length; i++) {
       rows.push({
         id: plants[i].id,
@@ -652,6 +655,7 @@
     }
     const s = entity.state;
     if (s === 'DEAD') return 'Dead';
+    if (s === 'SLEEP') return 'Sleeping';
     if (s === 'EATING') return 'Eating';
     if (s === 'FLEE') return entity._counterAttack ? 'Attacking' : 'Fleeing';
     if (s === 'BREEDING' || s === 'SEEK_MATE') return 'Breeding';
@@ -666,22 +670,8 @@
       }
       return s === 'SEEK_PREY' ? 'Hunting' : 'Hungry';
     }
-    if (s === 'ROAM') {
-      const speed = Math.hypot(entity.vx || 0, entity.vy || 0);
-      if (speed < 8 && entity.calories > entity.maxCalories * 0.7) return 'Sleeping';
-      return 'Roaming';
-    }
-    if (s === 'IDLE') {
-      const speed = Math.hypot(entity.vx || 0, entity.vy || 0);
-      if (
-        (entity.diet === 'predator' || entity.diet === 'omnivore') &&
-        speed < 8 &&
-        entity.calories > entity.maxCalories * 0.7
-      ) {
-        return 'Sleeping';
-      }
-      return 'Idle';
-    }
+    if (s === 'ROAM') return 'Roaming';
+    if (s === 'IDLE') return 'Idle';
     return s || 'Idle';
   }
 
@@ -747,9 +737,17 @@
     const lines = [
       name,
       cal + ' / ' + maxCal + ' cal',
-      'Age: ' + age,
-      'State: ' + st,
     ];
+    if (entity.kind !== 'plant' && entity.stamina != null) {
+      lines.push(
+        Math.round(entity.stamina) +
+          ' / ' +
+          Math.round(entity.maxStamina != null ? entity.maxStamina : 100) +
+          ' stam'
+      );
+    }
+    lines.push('Age: ' + age);
+    lines.push('State: ' + st);
 
     ctx.font = '12px monospace';
     let maxW = 0;
@@ -785,9 +783,11 @@
 
     const lines = [];
     lines.push('ECOSYSTEM  tick ' + stats.tick);
+    const plantsMax = stats.plantsMax || Wildborn.ecosystem.INITIAL_PLANT_COUNT || 2000;
     lines.push(
-      'Plants: ' + stats.plantsAlive + '  avgCal ' + stats.plantAvgCalories +
-      '  eggs ' + stats.eggs + '  corpses ' + stats.corpses
+      'Plants: ' + stats.plantsAlive + ' / ' + plantsMax +
+      '  avgCal ' + stats.plantAvgCalories +
+      '  corpses ' + stats.corpses
     );
     lines.push('Herbivores (' + stats.herbTotal + '):');
     for (const id in stats.herbivores) {

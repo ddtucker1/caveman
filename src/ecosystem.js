@@ -5,7 +5,7 @@
 (function (global) {
   const Wildborn = (global.Wildborn = global.Wildborn || {});
   const { createSpatialGrid } = Wildborn.spatial;
-  const { createPlant, pickSpecies, updatePlant, relocateToGrass } = Wildborn.plant;
+  const { createPlant, pickSpecies, updatePlant, relocateToLand } = Wildborn.plant;
   const {
     createAnimal,
     updateAnimal,
@@ -23,7 +23,6 @@
     cow: 6,
     raccoon: 5,
     bison: 4,
-    chicken: 15,
     ostrich: 3,
     turtle: 5,
     lizard: 8,
@@ -37,7 +36,7 @@
     alligator: 3,
   };
 
-  const INITIAL_PLANT_COUNT = 200;
+  const INITIAL_PLANT_COUNT = 2000;
 
   /**
    * @param {object} opts
@@ -57,7 +56,6 @@
 
     const plants = [];
     const animals = [];
-    const eggs = [];
     /** Visual-only brown pixels from roaming predators. */
     const poops = [];
     /** Short-lived white splash dots when animals move through water. */
@@ -95,20 +93,19 @@
       };
     }
 
-    /** Plants only spawn on green grass tiles; reject and retry otherwise. */
-    function findGrassSpot(maxAttempts) {
+    /** Plants spawn on any land tile (not water, not solid). */
+    function findLandSpot(maxAttempts) {
       maxAttempts = maxAttempts || 60;
       for (let i = 0; i < maxAttempts; i++) {
-        const angle = rng.float() * Math.PI * 2;
-        const dist = Math.sqrt(rng.float()) * spawnRadius;
-        const x = origin.x + Math.cos(angle) * dist;
-        const y = origin.y + Math.sin(angle) * dist;
+        // Uniform square sample — avoids center clustering from radial sqrt bias
+        const x = origin.x + (rng.float() * 2 - 1) * spawnRadius;
+        const y = origin.y + (rng.float() * 2 - 1) * spawnRadius;
         const tile = world.getTileAtPixel(x, y);
-        if (!world.isSolid(tile) && world.isGrass(tile)) {
+        if (!world.isSolid(tile) && !world.isSlow(tile)) {
           return { x: x, y: y, tile: tile };
         }
       }
-      // Fallback: spiral near origin for any grass tile
+      // Fallback: spiral near origin for any land tile
       const TILE_SIZE = world.TILE_SIZE || 32;
       for (let r = 0; r < 40; r++) {
         for (let dy = -r; dy <= r; dy++) {
@@ -117,7 +114,9 @@
             const x = origin.x + dx * TILE_SIZE;
             const y = origin.y + dy * TILE_SIZE;
             const tile = world.getTileAtPixel(x, y);
-            if (world.isGrass(tile)) return { x: x, y: y, tile: tile };
+            if (!world.isSolid(tile) && !world.isSlow(tile)) {
+              return { x: x, y: y, tile: tile };
+            }
           }
         }
       }
@@ -129,7 +128,6 @@
       for (let i = 0; i < maxAttempts; i++) {
         const spot = findWalkableSpot(1);
         if (world.isSlow(world.getTileAtPixel(spot.x, spot.y))) return spot;
-        // Also try a fresh roll biased toward rivers
         const angle = rng.float() * Math.PI * 2;
         const dist = Math.sqrt(rng.float()) * spawnRadius;
         const x = origin.x + Math.cos(angle) * dist;
@@ -140,19 +138,44 @@
     }
 
     function findRespawnSpot() {
-      return findGrassSpot(40);
+      return findLandSpot(40);
     }
 
     function spawnInitial() {
-      // Plants — grass terrain only
-      for (let i = 0; i < INITIAL_PLANT_COUNT; i++) {
-        const spot = findGrassSpot();
-        const plant = createPlant(pickSpecies(rng), spot.x, spot.y);
-        // Relocate any that landed off-grass (fallback edge cases)
-        if (!world.isGrass(world.getTileAtPixel(plant.x, plant.y))) {
-          relocateToGrass(plant, world);
+      // Plants — scatter across the full spawn map on any land
+      const gridN = Math.ceil(Math.sqrt(INITIAL_PLANT_COUNT));
+      const extent = spawnRadius * 2;
+      const cell = extent / gridN;
+      let planted = 0;
+
+      for (let gy = 0; gy < gridN && planted < INITIAL_PLANT_COUNT; gy++) {
+        for (let gx = 0; gx < gridN && planted < INITIAL_PLANT_COUNT; gx++) {
+          let x =
+            origin.x - spawnRadius + (gx + 0.5) * cell + rng.range(-cell * 0.35, cell * 0.35);
+          let y =
+            origin.y - spawnRadius + (gy + 0.5) * cell + rng.range(-cell * 0.35, cell * 0.35);
+          const tile = world.getTileAtPixel(x, y);
+          if (world.isSolid(tile) || world.isSlow(tile)) {
+            const spot = findLandSpot(12);
+            x = spot.x;
+            y = spot.y;
+          }
+          const plant = createPlant(pickSpecies(rng), x, y);
+          if (
+            world.isSolid(world.getTileAtPixel(plant.x, plant.y)) ||
+            world.isSlow(world.getTileAtPixel(plant.x, plant.y))
+          ) {
+            relocateToLand(plant, world);
+          }
+          plants.push(plant);
+          planted++;
         }
-        plants.push(plant);
+      }
+
+      while (planted < INITIAL_PLANT_COUNT) {
+        const spot = findLandSpot();
+        plants.push(createPlant(pickSpecies(rng), spot.x, spot.y));
+        planted++;
       }
 
       // Herbivores — assign group ids for herd species
@@ -237,28 +260,6 @@
         findNearestAnimal: function (x, y, radius, pred) {
           return animalGrid.findNearest(x, y, radius, pred);
         },
-        findNearestEgg: function (x, y, radius) {
-          let best = null;
-          let bestD = radius * radius;
-          for (let i = 0; i < eggs.length; i++) {
-            const e = eggs[i];
-            if (e.calories <= 0) continue;
-            const dx = e.x - x;
-            const dy = e.y - y;
-            const d2 = dx * dx + dy * dy;
-            if (d2 < bestD) {
-              bestD = d2;
-              best = e;
-            }
-          }
-          return best;
-        },
-        hasEggFromChicken: function (chickenId) {
-          for (let i = 0; i < eggs.length; i++) {
-            if (eggs[i].chickenId === chickenId && eggs[i].calories > 0) return true;
-          }
-          return false;
-        },
         queryAnimals: function (x, y, radius) {
           return animalGrid.queryRadius(x, y, radius);
         },
@@ -330,13 +331,9 @@
     function runTick(ctx) {
       tickCount += 1;
 
-      function isGrassAt(x, y) {
-        return world.isGrass(world.getTileAtPixel(x, y));
-      }
-
-      // Plants — grow on grass only; wither off-grass; respawn on grass
+      // Plants — grow anywhere; respawn on land
       for (let i = 0; i < plants.length; i++) {
-        updatePlant(plants[i], findRespawnSpot, isGrassAt);
+        updatePlant(plants[i], findRespawnSpot);
       }
 
       // Animals
@@ -347,11 +344,6 @@
         if (result.offspring) {
           for (let k = 0; k < result.offspring.length; k++) {
             newborns.push(result.offspring[k]);
-          }
-        }
-        if (result.eggs) {
-          for (let k = 0; k < result.eggs.length; k++) {
-            eggs.push(result.eggs[k]);
           }
         }
         if (result.remove) toRemove.push(animals[i].id);
@@ -367,14 +359,6 @@
 
       for (let i = 0; i < newborns.length; i++) {
         animals.push(newborns[i]);
-      }
-
-      // Egg decay
-      for (let i = eggs.length - 1; i >= 0; i--) {
-        eggs[i].decay -= 1;
-        if (eggs[i].decay <= 0 || eggs[i].calories <= 0) {
-          eggs.splice(i, 1);
-        }
       }
 
       // Rebuild after tick mutations so mid-tick queries stay sane next frame
@@ -442,6 +426,7 @@
       return {
         tick: tickCount,
         plantsAlive: plantsAlive,
+        plantsMax: INITIAL_PLANT_COUNT,
         plantAvgCalories: plantsAlive ? Math.round(plantCalories / plantsAlive) : 0,
         herbivores: herbCounts,
         herbTotal: herbTotal,
@@ -449,7 +434,6 @@
         predTotal: predTotal,
         avgCalories: avgCalories,
         corpses: corpses,
-        eggs: eggs.length,
         poops: poops.length,
         animalTotal: animals.length,
       };
@@ -469,7 +453,6 @@
     return {
       plants: plants,
       animals: animals,
-      eggs: eggs,
       poops: poops,
       splashes: splashes,
       update: update,
