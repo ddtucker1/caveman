@@ -46,9 +46,9 @@ function assert(cond, msg) {
 
 // --- Unit: map size ---
 {
-  assert(MAP_TILES === 200, 'map is 200×200 tiles');
+  assert(MAP_TILES === 400, 'map is 400×400 tiles');
   assert(TILE_SIZE === 32, 'tile size is 32px');
-  assert(MAP_PIXEL_SIZE === 6400, 'map is 6400×6400 pixels');
+  assert(MAP_PIXEL_SIZE === 12800, 'map is 12800×12800 pixels');
 }
 
 // --- Unit: spatial grid ---
@@ -407,8 +407,8 @@ function assert(cond, msg) {
     config: {
       ecosystemEnabled: true,
       ecosystemTickSeconds: 0.5,
-      mapTiles: 200,
-      ecosystemSpawnRadius: 100 * TILE_SIZE,
+      mapTiles: 400,
+      ecosystemSpawnRadius: 200 * TILE_SIZE,
       spatialCellSize: 64,
     },
     origin: { x: MAP_PIXEL_SIZE / 2, y: MAP_PIXEL_SIZE / 2 },
@@ -416,8 +416,8 @@ function assert(cond, msg) {
 
   assert(eco.plants.length === INITIAL_PLANT_COUNT, 'spawns 150 plants');
   assert(INITIAL_PLANT_COUNT === 150, 'INITIAL_PLANT_COUNT is 150');
-  assert(eco.mapTiles === 200, 'ecosystem mapTiles is 200');
-  assert(eco.mapPixelSize === 6400, 'ecosystem mapPixelSize is 6400');
+  assert(eco.mapTiles === 400, 'ecosystem mapTiles is 400');
+  assert(eco.mapPixelSize === 12800, 'ecosystem mapPixelSize is 12800');
 
   // Plants should be on land (not water) and within map
   let plantsOnLand = 0;
@@ -433,7 +433,7 @@ function assert(cond, msg) {
   }
   assert(plantsOnWater === 0, 'no plants spawned on water');
   assert(plantsOnLand === eco.plants.length, 'all plants spawned on land (' + plantsOnLand + '/' + eco.plants.length + ')');
-  assert(plantsInBounds === eco.plants.length, 'all plants inside 200×200 map');
+  assert(plantsInBounds === eco.plants.length, 'all plants inside 400×400 map');
 
   // Predators start roaming (not hunting) when well-fed
   const wolves = eco.animals.filter((a) => a.species === 'wolf');
@@ -487,7 +487,7 @@ function assert(cond, msg) {
   assert(kids.every((k) => !k.isAdult && k.species === 'deer'), 'offspring are juvenile deer');
   assert(deerA.breedingCooldown === Wildborn.animal.BREED_COOLDOWN, 'breeding cooldown applied');
 
-  // Ecosystem breeding path (deterministic): on 200×200 animals rarely meet in 60s,
+  // Ecosystem breeding path (deterministic): on 400×400 animals rarely meet in 60s,
   // so place two fertile mates adjacent and confirm the tick loop produces offspring.
   const beforeCount = eco.animals.length;
   const mateA = Wildborn.animal.createAnimal('deer', 200, 200, { sex: 'female' });

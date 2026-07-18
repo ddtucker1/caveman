@@ -22,7 +22,7 @@
   /** Draw all tiles currently visible through the camera (clamped to map). */
   function drawWorld(ctx, world, camera, time) {
     time = time || 0;
-    const mapTiles = world.MAP_TILES || Wildborn.world.MAP_TILES || 200;
+    const mapTiles = world.MAP_TILES || Wildborn.world.MAP_TILES || 400;
     const tx0 = Math.max(0, Math.floor(camera.x / TILE_SIZE));
     const ty0 = Math.max(0, Math.floor(camera.y / TILE_SIZE));
     const tx1 = Math.min(mapTiles - 1, Math.ceil((camera.x + camera.width) / TILE_SIZE));
@@ -872,7 +872,7 @@
   let _minimapSeed = null;
 
   function ensureMinimapTerrain(world) {
-    const mapTiles = world.MAP_TILES || Wildborn.world.MAP_TILES || 200;
+    const mapTiles = world.MAP_TILES || Wildborn.world.MAP_TILES || 400;
     if (_minimapTerrain && _minimapSeed === world.seedString) return _minimapTerrain;
     const c = document.createElement('canvas');
     c.width = mapTiles;
@@ -898,11 +898,11 @@
   }
 
   /**
-   * Minimap of the full 200×200 grid (bottom-right).
+   * Minimap of the full 400×400 grid (bottom-right).
    * Terrain sample + player / plant / animal dots.
    */
   function drawMinimap(ctx, world, player, ecosystem, viewW, viewH) {
-    const mapTiles = world.MAP_TILES || Wildborn.world.MAP_TILES || 200;
+    const mapTiles = world.MAP_TILES || Wildborn.world.MAP_TILES || 400;
     const mapPx = world.MAP_PIXEL_SIZE || mapTiles * TILE_SIZE;
     const size = Math.min(160, Math.floor(Math.min(viewW, viewH) * 0.22));
     const pad = 10;

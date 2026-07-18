@@ -19,8 +19,8 @@
 
   const TILE_SIZE = 32;
   const CHUNK_SIZE = 64; // 64x64 tiles per chunk
-  /** Fixed playable map: exactly 200×200 tiles → 6400×6400 pixels. */
-  const MAP_TILES = 200;
+  /** Fixed playable map: exactly 400×400 tiles → 12800×12800 pixels. */
+  const MAP_TILES = 400;
   const MAP_PIXEL_SIZE = MAP_TILES * TILE_SIZE;
 
   /** Colors used by the renderer (simple shapes for now). */
@@ -221,7 +221,7 @@
       }
     }
 
-    /** Preload every chunk that overlaps the fixed 200×200 map. */
+    /** Preload every chunk that overlaps the fixed 400×400 map. */
     function ensureMapLoaded() {
       return ensureChunksInBounds(0, 0, MAP_PIXEL_SIZE - 1, MAP_PIXEL_SIZE - 1);
     }
