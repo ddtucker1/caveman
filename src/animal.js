@@ -626,6 +626,16 @@
     return Math.max(MIN_SPEED, speed);
   }
 
+  /** True if pixel sits on a solid tile (dark green trees / mountains). */
+  function isSolidAt(ctx, x, y) {
+    if (!ctx) return false;
+    if (ctx.isSolid) return !!ctx.isSolid(x, y);
+    if (ctx.world) {
+      return ctx.world.isSolid(ctx.world.getTileAtPixel(x, y));
+    }
+    return false;
+  }
+
   /**
    * True when the animal may enter water: aquatic species, fleeing a nearby
    * predator, starving, or stuck on a shoreline while hunger-searching.
@@ -665,6 +675,7 @@
       const d = Math.hypot(x - animal.x, y - animal.y);
       if (d < minDist) continue;
       if (!fallback) fallback = { x: x, y: y };
+      if (isSolidAt(ctx, x, y)) continue;
       if (ctx && ctx.isWater && ctx.isWater(x, y) && !canCrossWater(animal, ctx)) continue;
       return { x: x, y: y };
     }
@@ -700,6 +711,7 @@
       const cl = Math.hypot(c.x, c.y) || 1;
       const nx = animal.x + (c.x / cl) * speed * dt;
       const ny = animal.y + (c.y / cl) * speed * dt;
+      if (isSolidAt(ctx, nx, ny)) continue;
       if (ctx.isWater && ctx.isWater(nx, ny)) continue;
       animal.vx = (c.x / cl) * speed;
       animal.vy = (c.y / cl) * speed;
@@ -835,8 +847,29 @@
     animal.vy = (dy / len) * speed;
     const prevX = animal.x;
     const prevY = animal.y;
-    animal.x += animal.vx * dt;
-    animal.y += animal.vy * dt;
+    const nextX = animal.x + animal.vx * dt;
+    const nextY = animal.y + animal.vy * dt;
+
+    // Axis-separate solid collision (trees / mountains) — same idea as the caveman
+    if (!isSolidAt(ctx, nextX, prevY)) {
+      animal.x = nextX;
+    } else {
+      animal.vx = 0;
+    }
+    if (!isSolidAt(ctx, animal.x, nextY)) {
+      animal.y = nextY;
+    } else {
+      animal.vy = 0;
+    }
+
+    // Fully blocked by solid terrain — slide around instead of freezing / tunneling
+    if (animal.x === prevX && animal.y === prevY && (dx !== 0 || dy !== 0)) {
+      clearPath(animal);
+      if (ctx && tryShoreSlide(animal, tx, ty, dt, speedMult, ctx)) return;
+      animal.vx = 0;
+      animal.vy = 0;
+      return;
+    }
 
     // Soft reject illegal water entry when not allowed
     if (
@@ -881,11 +914,14 @@
       animal.stateTimer = 1 + rng.float() * 2;
     }
 
-    // Soft water avoidance while wandering (unless desperate / aquatic)
+    // Soft avoidance of solids (always) and water (unless desperate / aquatic)
     let nx = animal.x + animal.vx * dt;
     let ny = animal.y + animal.vy * dt;
-    if (ctx && ctx.isWater && ctx.isWater(nx, ny) && !canCrossWater(animal, ctx)) {
-      // Sample several dry escape headings instead of a reverse bounce-lock
+    const blockedWater =
+      ctx && ctx.isWater && ctx.isWater(nx, ny) && !canCrossWater(animal, ctx);
+    const blockedSolid = isSolidAt(ctx, nx, ny);
+    if (blockedWater || blockedSolid) {
+      // Sample several escape headings instead of a reverse bounce-lock
       let found = false;
       const baseAng = Math.atan2(animal.vy, animal.vx);
       const tryAngles = [
@@ -903,7 +939,8 @@
         const ay = Math.sin(tryAngles[i]) * speed;
         const tx = animal.x + ax * dt;
         const ty = animal.y + ay * dt;
-        if (ctx.isWater(tx, ty)) continue;
+        if (isSolidAt(ctx, tx, ty)) continue;
+        if (ctx && ctx.isWater && ctx.isWater(tx, ty) && !canCrossWater(animal, ctx)) continue;
         animal.vx = ax;
         animal.vy = ay;
         nx = tx;
@@ -913,8 +950,8 @@
       }
       animal.stateTimer = 0.4 + rng.float() * 0.6;
       if (!found) {
-        // Fully boxed by water — mark stuck so canCrossWater can eventually free them
-        animal._waterStuckTimer = (animal._waterStuckTimer || 0) + dt;
+        // Fully boxed — mark stuck so canCrossWater can eventually free water pins
+        if (blockedWater) animal._waterStuckTimer = (animal._waterStuckTimer || 0) + dt;
         animal.vx = 0;
         animal.vy = 0;
         animal.stateTimer = 0;
@@ -924,8 +961,17 @@
 
     const prevX = animal.x;
     const prevY = animal.y;
-    animal.x = nx;
-    animal.y = ny;
+    // Axis-separate solid collision so wanderers slide along tree/mountain edges
+    if (!isSolidAt(ctx, nx, prevY)) {
+      animal.x = nx;
+    } else {
+      animal.vx = 0;
+    }
+    if (!isSolidAt(ctx, animal.x, ny)) {
+      animal.y = ny;
+    } else {
+      animal.vy = 0;
+    }
     animal.stateTimer -= dt;
 
     if (animal._inWater && ctx && ctx.spawnSplash) {
@@ -1973,5 +2019,6 @@
     enterSleep,
     wakeAnimal,
     canCrossWater,
+    isSolidAt,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -827,6 +827,82 @@ function assert(cond, msg) {
   );
 }
 
+// --- Unit: animals cannot enter trees / mountains (like the caveman) ---
+{
+  const world = createWorld('solid-block-test');
+  world.ensureMapLoaded();
+  let solid = null;
+  let land = null;
+  for (let ty = 0; ty < MAP_TILES && !(solid && land); ty++) {
+    for (let tx = 0; tx < MAP_TILES; tx++) {
+      const tile = world.getTile(tx, ty);
+      if (!solid && world.isSolid(tile)) {
+        // Prefer a solid tile with land neighbor so we can place an animal beside it
+        const neighbors = [
+          [tx - 1, ty],
+          [tx + 1, ty],
+          [tx, ty - 1],
+          [tx, ty + 1],
+        ];
+        for (let i = 0; i < neighbors.length; i++) {
+          const ntx = neighbors[i][0];
+          const nty = neighbors[i][1];
+          if (ntx < 0 || nty < 0 || ntx >= MAP_TILES || nty >= MAP_TILES) continue;
+          const nt = world.getTile(ntx, nty);
+          if (world.isLand(nt)) {
+            solid = { tx, ty, x: tx * TILE_SIZE + TILE_SIZE / 2, y: ty * TILE_SIZE + TILE_SIZE / 2 };
+            land = {
+              tx: ntx,
+              ty: nty,
+              x: ntx * TILE_SIZE + TILE_SIZE / 2,
+              y: nty * TILE_SIZE + TILE_SIZE / 2,
+            };
+            break;
+          }
+        }
+      }
+    }
+  }
+  assert(solid && land, 'found solid tile with adjacent land for collision test');
+  assert(Wildborn.animal.isSolidAt({ world }, solid.x, solid.y), 'isSolidAt detects tree/mountain pixels');
+  assert(!Wildborn.animal.isSolidAt({ world }, land.x, land.y), 'isSolidAt allows land pixels');
+
+  const deer = Wildborn.animal.createAnimal('deer', land.x, land.y);
+  deer.calories = deer.maxCalories * 0.4;
+  deer.state = 'SEEK_FOOD';
+  deer._hungerSearch = true;
+  deer._exploreGoal = { x: solid.x, y: solid.y };
+  deer._exploreTimer = 30;
+  const ctx = {
+    rng: createRng('solid-block'),
+    tickSeconds: 0.5,
+    world,
+    mapPixelSize: MAP_PIXEL_SIZE,
+    pathBudget: 100,
+    isWater: (x, y) => world.isSlow(world.getTileAtPixel(x, y)),
+    isSolid: (x, y) => world.isSolid(world.getTileAtPixel(x, y)),
+    findNearestPlant: () => null,
+    findNearestAnimal: () => null,
+    queryAnimals: () => [],
+    spawnSplash: () => {},
+  };
+  let enteredSolid = false;
+  for (let i = 0; i < 90; i++) {
+    Wildborn.animal.updateAnimal(deer, 0.1, ctx);
+    Wildborn.animal.clampToMap(deer, MAP_PIXEL_SIZE);
+    if (world.isSolid(world.getTileAtPixel(deer.x, deer.y))) {
+      enteredSolid = true;
+      break;
+    }
+  }
+  assert(!enteredSolid, 'animal never enters tree/mountain tiles while pathing toward them');
+  assert(
+    world.isLand(world.getTileAtPixel(deer.x, deer.y)) ||
+      world.isSlow(world.getTileAtPixel(deer.x, deer.y)),
+    'animal remains on non-solid terrain after blocked approach'
+  );
+}
+
 // --- Unit: predator hunt threshold / satiation ---
 {
   const wolf = Wildborn.animal.createAnimal('wolf', 100, 100);
@@ -1017,11 +1093,14 @@ function assert(cond, msg) {
   }
 
   let animalsOut = 0;
+  let animalsOnSolid = 0;
   for (const a of eco.animals) {
     if (!a.alive) continue;
     if (a.x < 0 || a.y < 0 || a.x > MAP_PIXEL_SIZE || a.y > MAP_PIXEL_SIZE) animalsOut++;
+    if (world.isSolid(world.getTileAtPixel(a.x, a.y))) animalsOnSolid++;
   }
   assert(animalsOut === 0, 'no living animals outside map after 60s');
+  assert(animalsOnSolid === 0, 'no living animals on trees/mountains after 60s');
 
   const stats = eco.getDebugStats();
   assert(stats.tick >= 100, 'ecosystem advanced many ticks (' + stats.tick + ')');

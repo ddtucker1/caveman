@@ -139,7 +139,8 @@
         const tx = rng.int(0, mapTiles - 1);
         const ty = rng.int(0, mapTiles - 1);
         const tile = world.getTile(tx, ty);
-        if (!world.isSolid(tile)) {
+        // Land only — never trees/mountains (or water) for generic spawns
+        if (world.isLand ? world.isLand(tile) : !world.isSolid(tile) && !world.isSlow(tile)) {
           return {
             x: tx * TILE_SIZE + TILE_SIZE / 2,
             y: ty * TILE_SIZE + TILE_SIZE / 2,
@@ -167,6 +168,24 @@
         }
       }
       return findWalkableSpot();
+    }
+
+    /**
+     * Jitter a pack/herd member near a valid anchor without landing on
+     * trees, mountains, or (for land animals) water.
+     */
+    function jitterNearSpot(spot, range, allowWater) {
+      for (let i = 0; i < 12; i++) {
+        let x = spot.x + rng.range(-range, range);
+        let y = spot.y + rng.range(-range, range);
+        x = Math.max(TILE_SIZE, Math.min(mapPixelSize - TILE_SIZE, x));
+        y = Math.max(TILE_SIZE, Math.min(mapPixelSize - TILE_SIZE, y));
+        const tile = world.getTileAtPixel(x, y);
+        if (world.isSolid(tile)) continue;
+        if (!allowWater && world.isSlow(tile)) continue;
+        return { x: x, y: y };
+      }
+      return { x: spot.x, y: spot.y };
     }
 
     /** Respawn: completely random land tile anywhere on the 400×400 map. */
@@ -218,10 +237,9 @@
           let x = spot.x;
           let y = spot.y;
           if (inGroup > 0 && def.maxGroupSize > 1) {
-            x += rng.range(-40, 40);
-            y += rng.range(-40, 40);
-            x = Math.max(TILE_SIZE, Math.min(mapPixelSize - TILE_SIZE, x));
-            y = Math.max(TILE_SIZE, Math.min(mapPixelSize - TILE_SIZE, y));
+            const jittered = jitterNearSpot(spot, 40, !!def.aquatic);
+            x = jittered.x;
+            y = jittered.y;
           }
           animals.push(createAnimal(species, x, y, { groupId: groupId }));
           inGroup++;
@@ -239,14 +257,14 @@
             groupId = nextGroupId++;
             inGroup = 0;
           }
-          const spot = species === 'alligator' ? findWaterSpot() : findWalkableSpot();
+          const allowWater = species === 'alligator' || !!def.aquatic;
+          const spot = allowWater ? findWaterSpot() : findWalkableSpot();
           let x = spot.x;
           let y = spot.y;
           if (inGroup > 0 && def.maxGroupSize > 1) {
-            x += rng.range(-50, 50);
-            y += rng.range(-50, 50);
-            x = Math.max(TILE_SIZE, Math.min(mapPixelSize - TILE_SIZE, x));
-            y = Math.max(TILE_SIZE, Math.min(mapPixelSize - TILE_SIZE, y));
+            const jittered = jitterNearSpot(spot, 50, allowWater);
+            x = jittered.x;
+            y = jittered.y;
           }
           const sex = species === 'lion' ? (rng.chance(0.6) ? 'female' : 'male') : undefined;
           animals.push(createAnimal(species, x, y, { groupId: groupId, sex: sex }));
@@ -282,12 +300,15 @@
     /**
      * Cheap far-LOD step: keep sliding along an existing path / velocity
      * without AI decisions or new A* searches.
-     * Non-aquatic animals soft-reject water so far LOD cannot pin them in lakes.
+     * Soft-rejects solids (trees / mountains) always, and water for non-aquatic
+     * animals so far LOD cannot pin them in lakes or tunnel through terrain.
      */
     function cheapMoveAnimal(animal, dt) {
       if (animal.state === AI_STATE.DEAD) return;
       const prevX = animal.x;
       const prevY = animal.y;
+      let nextX = animal.x;
+      let nextY = animal.y;
       if (animal._path && animal._pathIndex < animal._path.length) {
         const wp = animal._path[animal._pathIndex];
         const dx = wp.x - animal.x;
@@ -299,16 +320,28 @@
         }
         const speed = Math.max(8, animal.baseSpeed || 20);
         const step = Math.min(len, speed * dt);
-        animal.x += (dx / len) * step;
-        animal.y += (dy / len) * step;
+        nextX = animal.x + (dx / len) * step;
+        nextY = animal.y + (dy / len) * step;
         animal.vx = (dx / len) * speed;
         animal.vy = (dy / len) * speed;
         animal.facingRight = dx >= 0;
       } else if (animal.vx || animal.vy) {
-        animal.x += animal.vx * dt;
-        animal.y += animal.vy * dt;
+        nextX = animal.x + animal.vx * dt;
+        nextY = animal.y + animal.vy * dt;
       } else {
         return;
+      }
+
+      // Axis-separate solid collision (trees / mountains)
+      if (!world.isSolid(world.getTileAtPixel(nextX, prevY))) {
+        animal.x = nextX;
+      } else {
+        animal.vx = 0;
+      }
+      if (!world.isSolid(world.getTileAtPixel(animal.x, nextY))) {
+        animal.y = nextY;
+      } else {
+        animal.vy = 0;
       }
 
       if (
@@ -344,6 +377,10 @@
         pathBudget: pathBudget,
         isWater: function (x, y) {
           return world.isSlow(world.getTileAtPixel(x, y));
+        },
+        /** Dark green trees and mountains — impassable for animals and the caveman. */
+        isSolid: function (x, y) {
+          return world.isSolid(world.getTileAtPixel(x, y));
         },
         findNearestPlant: function (x, y, radius, pred) {
           return plantGrid.findNearest(x, y, radius, pred);
