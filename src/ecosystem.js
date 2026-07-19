@@ -38,11 +38,11 @@
   /** Exactly 150 plants scattered across the 400×400 map. */
   const INITIAL_PLANT_COUNT = 150;
 
-  /** After a species hits zero living animals, wait 10 min then spawn this many. */
+  /** After a species hits zero living animals, wait 25 min then spawn this many. */
   const EXTINCTION_REPOPULATE_COUNT = 4;
-  /** 600 seconds (10 min) at 0.5s/tick → 1200 ticks. */
-  const EXTINCTION_REPOPULATE_DELAY_SECONDS = 600;
-  const EXTINCTION_REPOPULATE_DELAY_TICKS = 1200;
+  /** 1500 seconds (25 min) at 0.5s/tick → 3000 ticks. */
+  const EXTINCTION_REPOPULATE_DELAY_SECONDS = 1500;
+  const EXTINCTION_REPOPULATE_DELAY_TICKS = 3000;
 
   /**
    * @param {object} opts
@@ -229,7 +229,7 @@
     }
 
     /**
-     * When any species reaches zero living population, wait 10 minutes then
+     * When any species reaches zero living population, wait 25 minutes then
      * repopulate with EXTINCTION_REPOPULATE_COUNT individuals at random spots.
      */
     function updateExtinctionRepopulation() {
@@ -392,7 +392,16 @@
         nextY = animal.y + animal.vy * dt;
       } else {
         // Stationary far-LOD animals still need an escape chance when pinned
-        // against water / tree edges between full AI frames.
+        // against water / tree edges between full AI frames. Build pressure
+        // only when open land neighbors are scarce — otherwise timers never
+        // rise for animals that arrived with vx=vy=0.
+        const openLand = countOpenLandNeighbors(animal.x, animal.y);
+        if (openLand <= 1) {
+          animal._obstacleStuckTimer = (animal._obstacleStuckTimer || 0) + dt;
+          if (isNearWaterPixel(animal.x, animal.y)) {
+            animal._waterStuckTimer = (animal._waterStuckTimer || 0) + dt;
+          }
+        }
         maybeCheapUnstick(animal, dt);
         return;
       }
@@ -409,16 +418,18 @@
         animal.vy = 0;
       }
 
+      const wasInWater = world.isSlow(world.getTileAtPixel(prevX, prevY));
+      const inWater = world.isSlow(world.getTileAtPixel(animal.x, animal.y));
+      const nearWater = inWater || isNearWaterPixel(animal.x, animal.y);
+      // Finish a crossing already underway; otherwise require stuck pressure.
       const allowWater =
         animal.aquatic ||
         animal.waterSpeedKey ||
+        wasInWater ||
         (animal._waterStuckTimer || 0) >=
           ((Wildborn.animal && Wildborn.animal.WATER_STUCK_CROSS_SECONDS) || 1.25);
 
-      if (
-        !allowWater &&
-        world.isSlow(world.getTileAtPixel(animal.x, animal.y))
-      ) {
+      if (!allowWater && inWater) {
         animal.x = prevX;
         animal.y = prevY;
         animal.vx = 0;
@@ -433,14 +444,64 @@
 
       if (animal.x === prevX && animal.y === prevY) {
         animal._obstacleStuckTimer = (animal._obstacleStuckTimer || 0) + dt;
+        // Tree+water pockets often bounce off solids without ever entering water,
+        // so shoreline pressure must still accumulate for a temporary crossing.
+        if (nearWater) {
+          animal._waterStuckTimer = (animal._waterStuckTimer || 0) + dt;
+        }
         maybeCheapUnstick(animal, dt);
       } else {
         animal._obstacleStuckTimer = Math.max(
           0,
           (animal._obstacleStuckTimer || 0) - dt * 2
         );
-        animal._waterStuckTimer = Math.max(0, (animal._waterStuckTimer || 0) - dt);
+        // Do not decay the crossing timer while swimming — that used to yank
+        // far-LOD animals back onto the shoreline mid-crossing.
+        if (!inWater) {
+          animal._waterStuckTimer = Math.max(0, (animal._waterStuckTimer || 0) - dt);
+        }
       }
+    }
+
+    /** True when this pixel or an orthogonal/diagonal neighbor is water. */
+    function isNearWaterPixel(x, y) {
+      if (world.isSlow(world.getTileAtPixel(x, y))) return true;
+      const offsets = [
+        [TILE_SIZE, 0],
+        [-TILE_SIZE, 0],
+        [0, TILE_SIZE],
+        [0, -TILE_SIZE],
+        [TILE_SIZE, TILE_SIZE],
+        [-TILE_SIZE, TILE_SIZE],
+        [TILE_SIZE, -TILE_SIZE],
+        [-TILE_SIZE, -TILE_SIZE],
+      ];
+      for (let i = 0; i < offsets.length; i++) {
+        if (world.isSlow(world.getTileAtPixel(x + offsets[i][0], y + offsets[i][1]))) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    /** Count orthogonal land neighbors that are neither water nor solid. */
+    function countOpenLandNeighbors(x, y) {
+      const offsets = [
+        [TILE_SIZE, 0],
+        [-TILE_SIZE, 0],
+        [0, TILE_SIZE],
+        [0, -TILE_SIZE],
+      ];
+      let open = 0;
+      for (let i = 0; i < offsets.length; i++) {
+        const px = x + offsets[i][0];
+        const py = y + offsets[i][1];
+        const tile = world.getTileAtPixel(px, py);
+        if (!world.isSlow(tile) && !world.isSolid(tile) && world.isLand(tile)) {
+          open++;
+        }
+      }
+      return open;
     }
 
     /**
@@ -457,10 +518,18 @@
       if (waterStuck < waterThresh * 0.5 && obstacleStuck < obstThresh * 0.5) {
         return;
       }
+      const nearWater = isNearWaterPixel(animal.x, animal.y);
       const allowWater =
-        animal.aquatic || animal.waterSpeedKey || waterStuck >= waterThresh;
+        animal.aquatic ||
+        animal.waterSpeedKey ||
+        waterStuck >= waterThresh ||
+        (nearWater && obstacleStuck >= obstThresh);
       const speed = Math.max(8, animal.baseSpeed || 20);
-      const step = Math.max(TILE_SIZE * 0.45, speed * Math.max(dt, 0.1));
+      const stuckHard = waterStuck >= waterThresh || obstacleStuck >= obstThresh;
+      const step = Math.max(
+        TILE_SIZE * (stuckHard ? 0.85 : 0.45),
+        speed * Math.max(dt, 0.1)
+      );
       const dirs = [
         [step, 0],
         [-step, 0],
@@ -479,12 +548,19 @@
       for (let i = 0; i < dirs.length; i++) {
         if (i !== prefer) order.push(i);
       }
+      // Prefer dry land exits; only take water when that is the remaining outlet.
+      let waterFallback = null;
       for (let o = 0; o < order.length; o++) {
         const i = order[o];
         const nx = animal.x + dirs[i][0];
         const ny = animal.y + dirs[i][1];
         if (world.isSolid(world.getTileAtPixel(nx, ny))) continue;
-        if (!allowWater && world.isSlow(world.getTileAtPixel(nx, ny))) continue;
+        const wet = world.isSlow(world.getTileAtPixel(nx, ny));
+        if (wet && !allowWater) continue;
+        if (wet) {
+          if (!waterFallback) waterFallback = i;
+          continue;
+        }
         animal.x = nx;
         animal.y = ny;
         animal.vx = (dirs[i][0] / step) * speed * 0.5;
@@ -493,6 +569,16 @@
         animal._path = null;
         animal._pathIndex = 0;
         return;
+      }
+      if (waterFallback != null) {
+        const i = waterFallback;
+        animal.x = animal.x + dirs[i][0];
+        animal.y = animal.y + dirs[i][1];
+        animal.vx = (dirs[i][0] / step) * speed * 0.5;
+        animal.vy = (dirs[i][1] / step) * speed * 0.5;
+        animal._cheapUnstickDir = i;
+        animal._path = null;
+        animal._pathIndex = 0;
       }
     }
 
