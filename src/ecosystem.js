@@ -38,6 +38,12 @@
   /** Exactly 150 plants scattered across the 400×400 map. */
   const INITIAL_PLANT_COUNT = 150;
 
+  /** After a species hits zero living animals, wait 10 min then spawn this many. */
+  const EXTINCTION_REPOPULATE_COUNT = 4;
+  /** 600 seconds (10 min) at 0.5s/tick → 1200 ticks. */
+  const EXTINCTION_REPOPULATE_DELAY_SECONDS = 600;
+  const EXTINCTION_REPOPULATE_DELAY_TICKS = 1200;
+
   /**
    * @param {object} opts
    * @param {object} opts.world
@@ -74,6 +80,8 @@
     let tickCount = 0;
     let nextGroupId = 1;
     let splashCooldown = 0;
+    /** speciesId → ticks remaining until extinction repopulation fires. */
+    const extinctionTimers = {};
 
     function isLandTile(tile) {
       return world.isLand ? world.isLand(tile) : !world.isSolid(tile) && !world.isSlow(tile);
@@ -190,6 +198,63 @@
     /** Respawn: completely random land tile anywhere on the 400×400 map. */
     function findRespawnSpot() {
       return findRandomLandTile(800);
+    }
+
+    function isLiveAnimal(animal) {
+      return !!(animal && animal.alive && animal.state !== AI_STATE.DEAD);
+    }
+
+    function countLiveSpecies(speciesId) {
+      let n = 0;
+      for (let i = 0; i < animals.length; i++) {
+        const a = animals[i];
+        if (a.species === speciesId && isLiveAnimal(a)) n++;
+      }
+      return n;
+    }
+
+    /** Spawn `count` of a species at independent random map locations. */
+    function spawnSpeciesAtRandom(speciesId, count) {
+      const def = HERBIVORE_SPECIES[speciesId] || PREDATOR_SPECIES[speciesId];
+      if (!def) return;
+      const allowWater = speciesId === 'alligator' || !!def.aquatic;
+      for (let i = 0; i < count; i++) {
+        const spot = allowWater ? findWaterSpot() : findWalkableSpot();
+        const sex = speciesId === 'lion' ? (rng.chance(0.6) ? 'female' : 'male') : undefined;
+        animals.push(
+          createAnimal(speciesId, spot.x, spot.y, {
+            groupId: nextGroupId++,
+            sex: sex,
+          })
+        );
+      }
+    }
+
+    /**
+     * When any species reaches zero living population, wait 10 minutes then
+     * repopulate with EXTINCTION_REPOPULATE_COUNT individuals at random spots.
+     */
+    function updateExtinctionRepopulation() {
+      for (const speciesId in HERBIVORE_SPECIES) {
+        advanceExtinctionTimer(speciesId);
+      }
+      for (const speciesId in PREDATOR_SPECIES) {
+        advanceExtinctionTimer(speciesId);
+      }
+    }
+
+    function advanceExtinctionTimer(speciesId) {
+      if (countLiveSpecies(speciesId) > 0) {
+        delete extinctionTimers[speciesId];
+        return;
+      }
+      if (extinctionTimers[speciesId] == null) {
+        extinctionTimers[speciesId] = EXTINCTION_REPOPULATE_DELAY_TICKS;
+      }
+      extinctionTimers[speciesId] -= 1;
+      if (extinctionTimers[speciesId] > 0) return;
+      spawnSpeciesAtRandom(speciesId, EXTINCTION_REPOPULATE_COUNT);
+      delete extinctionTimers[speciesId];
     }
 
     function spawnInitial() {
@@ -579,6 +644,7 @@
         animals.push(newborns[i]);
       }
 
+      updateExtinctionRepopulation();
       rebuildGrids();
     }
 
@@ -693,5 +759,8 @@
     INITIAL_HERBIVORES,
     INITIAL_PREDATORS,
     INITIAL_PLANT_COUNT,
+    EXTINCTION_REPOPULATE_COUNT,
+    EXTINCTION_REPOPULATE_DELAY_SECONDS,
+    EXTINCTION_REPOPULATE_DELAY_TICKS,
   };
 })(typeof window !== 'undefined' ? window : globalThis);
