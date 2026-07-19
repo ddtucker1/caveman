@@ -93,9 +93,9 @@ function assert(cond, msg) {
   const taken = consumePlant(p, 100);
   assert(taken === 10 && !p.alive, 'consumePlant depletes and kills plant (stays in memory)');
   assert(p.growthPaused === true, 'eating pauses plant growth');
-  assert(p.respawnTimer === RESPAWN_DELAY_TICKS, 'respawn timer starts at 2400s (4800 ticks)');
-  assert(RESPAWN_DELAY_TICKS === 4800, 'RESPAWN_DELAY_TICKS is 4800');
-  assert(Wildborn.plant.RESPAWN_DELAY_SECONDS === 2400, 'RESPAWN_DELAY_SECONDS is 2400');
+  assert(p.respawnTimer === RESPAWN_DELAY_TICKS, 'respawn timer starts at 4800s (9600 ticks)');
+  assert(RESPAWN_DELAY_TICKS === 9600, 'RESPAWN_DELAY_TICKS is 9600');
+  assert(Wildborn.plant.RESPAWN_DELAY_SECONDS === 4800, 'RESPAWN_DELAY_SECONDS is 4800');
   // Fast-forward respawn
   p.respawnTimer = 1;
   updatePlant(p, () => ({ x: 50, y: 50 }));
@@ -131,7 +131,7 @@ function assert(cond, msg) {
   const bush = createPlant('berry_bush', 0, 0);
   assert(bush.maxCalories === 250, 'berry bush max is 250');
   const tree = createPlant('fruit_tree', 0, 0);
-  assert(tree.maxCalories === 1000, 'fruit tree max is 1000');
+  assert(tree.maxCalories === 2000, 'fruit tree max is 2000');
   const mush = createPlant('mushroom', 0, 0);
   assert(mush.maxCalories === 200, 'mushroom max is 200');
   const cactus = createPlant('cactus', 0, 0);
@@ -708,7 +708,7 @@ function assert(cond, msg) {
   );
 }
 
-// --- Unit: turtles/alligators double speed in water; others half ---
+// --- Unit: turtles 2× in water; alligator 35 land / 75 water; others half ---
 {
   const turtle = Wildborn.animal.createAnimal('turtle', 100, 100);
   const gator = Wildborn.animal.createAnimal('alligator', 100, 100);
@@ -716,7 +716,12 @@ function assert(cond, msg) {
   assert(turtle.aquatic === true, 'turtle is aquatic');
   assert(turtle.waterSpeedMult === 2, 'turtle waterSpeedMult is 2×');
   assert(gator.aquatic === true, 'alligator is aquatic');
-  assert(gator.waterSpeedMult === 2, 'alligator keeps 2× water speed');
+  assert(gator.speedKey === 'medium', 'alligator land speed key is medium (35)');
+  assert(gator.baseSpeed === 35, 'alligator land speed is 35');
+  assert(
+    Math.abs(gator.waterSpeedMult - 75 / 35) < 1e-9,
+    'alligator waterSpeedMult targets 75 px/s'
+  );
   assert(Wildborn.animal.canCrossWater(turtle, {}), 'turtle may cross water');
   assert(Wildborn.animal.canCrossWater(gator, {}), 'alligator may cross water');
 
@@ -777,8 +782,12 @@ function assert(cond, msg) {
   Wildborn.animal.updateAnimal(gator, 0.2, waterCtx);
   const gatorWater = Math.hypot(gator.vx, gator.vy);
   assert(
-    gatorWater >= gatorLand * 1.9,
-    'alligator water speed ~2× land (' + gatorWater.toFixed(1) + ' vs ' + gatorLand.toFixed(1) + ')'
+    gatorWater >= gatorLand * (75 / 35) * 0.95,
+    'alligator water speed ~75 with land ~35 (' +
+      gatorWater.toFixed(1) +
+      ' vs ' +
+      gatorLand.toFixed(1) +
+      ')'
   );
 
   deer.calories = deer.maxCalories * 0.4;
