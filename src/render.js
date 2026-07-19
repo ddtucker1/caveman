@@ -55,7 +55,6 @@
     if (tile === TILE.GRASS) return terrain.grassTint || '#4a7a34';
     if (tile === TILE.DENSE_GRASS) return terrain.denseGrassTint || '#3a6a28';
     if (tile === TILE.WATER) return terrain.waterBase || TILE_COLORS[TILE.WATER];
-    if (tile === TILE.SAND) return terrain.sandColor || TILE_COLORS[TILE.SAND];
     if (tile === TILE.TREE) return TILE_COLORS[TILE.TREE];
     if (tile === TILE.CLIFF) return TILE_COLORS[TILE.CLIFF];
     if (tile === TILE.PLANT) return TILE_COLORS[TILE.PLANT];
@@ -67,7 +66,6 @@
       tile === TILE.GRASS ||
       tile === TILE.DENSE_GRASS ||
       tile === TILE.PLANT ||
-      tile === TILE.SAND ||
       tile === TILE.WATER
     );
   }
@@ -139,20 +137,13 @@
       const nearShore =
         neighbors.n === TILE.GRASS ||
         neighbors.n === TILE.DENSE_GRASS ||
-        neighbors.n === TILE.SAND ||
         neighbors.s === TILE.GRASS ||
         neighbors.s === TILE.DENSE_GRASS ||
-        neighbors.s === TILE.SAND ||
         neighbors.w === TILE.GRASS ||
         neighbors.w === TILE.DENSE_GRASS ||
-        neighbors.w === TILE.SAND ||
         neighbors.e === TILE.GRASS ||
-        neighbors.e === TILE.DENSE_GRASS ||
-        neighbors.e === TILE.SAND;
+        neighbors.e === TILE.DENSE_GRASS;
       ctx.fillStyle = nearShore ? shallow : deep;
-      ctx.fillRect(sx, sy, TILE_SIZE, TILE_SIZE);
-    } else if (tile === TILE.SAND) {
-      ctx.fillStyle = terrain.sandColor || '#c8b888';
       ctx.fillRect(sx, sy, TILE_SIZE, TILE_SIZE);
     } else {
       ctx.fillStyle = baseColor;
@@ -236,20 +227,6 @@
           sy + TILE_SIZE * 0.35,
           terrain,
           hash2(tx, ty + 3)
-        );
-      }
-    }
-
-    if (tile === TILE.SAND) {
-      ctx.fillStyle = terrain.sandShade || 'rgba(140,110,60,0.2)';
-      const n = 8;
-      for (let i = 0; i < n; i++) {
-        const h = hash2(tx * 11 + i, ty * 19 + i);
-        ctx.fillRect(
-          sx + 3 + h * (TILE_SIZE - 8),
-          sy + 3 + hash2(ty + i, tx) * (TILE_SIZE - 8),
-          2.5,
-          1.5
         );
       }
     }
@@ -358,7 +335,6 @@
         if (
           nTile === TILE.GRASS ||
           nTile === TILE.DENSE_GRASS ||
-          nTile === TILE.SAND ||
           nTile === TILE.PLANT ||
           nTile === TILE.TREE
         ) {
@@ -799,20 +775,10 @@
     const base = shapeDef ? shapeDef.size : animal.baseSize || animal.size;
     const scale = (animal.size / base) * ENTITY_VISUAL_SCALE;
 
-    // Wider deadzone so tiny / oscillating vx near edges does not flip the
-    // sprite every frame (reads as vibration instead of walking).
-    const facingRight = animal.vx >= 0;
-    if (Math.abs(animal.vx) < 20 && animal._facingRight != null) {
-      // keep last
-    } else if (
-      animal._facingRight != null &&
-      facingRight !== animal._facingRight &&
-      Math.abs(animal.vx) < 44
-    ) {
-      // keep last until lateral velocity is clearly committed
-    } else {
-      animal._facingRight = facingRight;
-    }
+    // Any westward motion → face west; any eastward motion → face east.
+    // Hold last facing when horizontal velocity is zero (idle / vertical-only).
+    if (animal.vx < 0) animal._facingRight = false;
+    else if (animal.vx > 0) animal._facingRight = true;
     const face = animal._facingRight !== false;
 
     const speed = Math.hypot(animal.vx || 0, animal.vy || 0);
@@ -937,7 +903,7 @@
     const plantsMax =
       (stats && stats.plantsMax) ||
       (Wildborn.ecosystem && Wildborn.ecosystem.INITIAL_PLANT_COUNT) ||
-      150;
+      100;
 
     const rows = [];
     rows.push({
@@ -1115,7 +1081,7 @@
 
     const lines = [];
     lines.push('ECOSYSTEM  tick ' + stats.tick);
-    const plantsMax = stats.plantsMax || Wildborn.ecosystem.INITIAL_PLANT_COUNT || 150;
+    const plantsMax = stats.plantsMax || Wildborn.ecosystem.INITIAL_PLANT_COUNT || 100;
     lines.push(
       'Plants: ' + stats.plantsAlive + ' / ' + plantsMax +
       (stats.plantsSprouting ? '  waiting ' + stats.plantsSprouting : '') +

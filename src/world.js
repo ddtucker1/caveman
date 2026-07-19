@@ -14,7 +14,6 @@
     WATER: 3,
     CLIFF: 4,
     PLANT: 5,
-    SAND: 6,
   };
 
   const TILE_SIZE = 64;
@@ -31,7 +30,6 @@
     [TILE.WATER]: '#2a6a9a',
     [TILE.CLIFF]: '#6a6a62',
     [TILE.PLANT]: '#6aaa3a',
-    [TILE.SAND]: '#c2b07a',
   };
 
   /** True if the tile blocks movement. */
@@ -134,9 +132,6 @@
           tile = TILE.CLIFF;
         } else if (river > 0.48 && river < 0.54 && elev < 0.55) {
           tile = TILE.WATER;
-        } else if (river > 0.455 && river < 0.565 && elev < 0.6) {
-          // Sandy shore bands for soft water↔land transitions
-          tile = TILE.SAND;
         } else if (moist > 0.55 && elev > 0.35 && elev < 0.65) {
           const local = valueNoise2D(wx * 0.5, wy * 0.5, seedNum + 333);
           tile = local > 0.55 ? TILE.TREE : TILE.DENSE_GRASS;

@@ -21,7 +21,7 @@
      */
     ecosystemSpawnRadius: 200 * 64,
 
-    /** Spatial hash cell size in world pixels (tuned for ~150 plants / ~100 animals). */
+    /** Spatial hash cell size in world pixels (tuned for ~100 plants / ~100 animals). */
     spatialCellSize: 128,
 
     /**

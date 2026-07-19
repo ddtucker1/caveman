@@ -1704,8 +1704,8 @@ function assert(cond, msg) {
     origin: { x: MAP_PIXEL_SIZE / 2, y: MAP_PIXEL_SIZE / 2 },
   });
 
-  assert(eco.plants.length === INITIAL_PLANT_COUNT, 'spawns 150 plants');
-  assert(INITIAL_PLANT_COUNT === 150, 'INITIAL_PLANT_COUNT is 150');
+  assert(eco.plants.length === INITIAL_PLANT_COUNT, 'spawns 100 plants');
+  assert(INITIAL_PLANT_COUNT === 100, 'INITIAL_PLANT_COUNT is 100');
   assert(eco.mapTiles === 400, 'ecosystem mapTiles is 400');
   assert(eco.mapPixelSize === 25600, 'ecosystem mapPixelSize is 25600');
 
@@ -1762,8 +1762,8 @@ function assert(cond, msg) {
 
   const stats = eco.getDebugStats();
   assert(stats.tick >= 100, 'ecosystem advanced many ticks (' + stats.tick + ')');
-  assert(stats.plantsAlive + stats.plantsSprouting === 150, 'plant entities preserved (alive+sprouts=150)');
-  assert(stats.plantsMax === 150, 'debug stats expose plant max 150');
+  assert(stats.plantsAlive + stats.plantsSprouting === 100, 'plant entities preserved (alive+sprouts=100)');
+  assert(stats.plantsMax === 100, 'debug stats expose plant max 100');
   assert(stats.herbTotal + stats.predTotal > 0, 'animals still alive (' + (stats.herbTotal + stats.predTotal) + ')');
   assert(stats.eggs == null, 'eggs removed from stats');
 
