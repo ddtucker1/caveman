@@ -1033,6 +1033,197 @@ function assert(cond, msg) {
       ')'
   );
 
+  // Tree corridors / cul-de-sacs used to re-pick opposite escape goals every
+  // frame when the next step was blocked — animals stayed in ROAM/IDLE while
+  // thrashing in place. Stress the densest solid traps, not only water edges.
+  const treeCorridors = [];
+  for (let ty = 2; ty < MAP_TILES - 2 && treeCorridors.length < 40; ty++) {
+    for (let tx = 2; tx < MAP_TILES - 2 && treeCorridors.length < 40; tx++) {
+      if (!world.isLand(world.getTile(tx, ty))) continue;
+      if (world.isSolid(world.getTile(tx, ty))) continue;
+      let waterN = 0;
+      let landN = 0;
+      let solidN = 0;
+      const dirs = [
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1],
+      ];
+      for (let i = 0; i < dirs.length; i++) {
+        const t = world.getTile(tx + dirs[i][0], ty + dirs[i][1]);
+        if (world.isSlow(t)) waterN++;
+        else if (world.isSolid(t)) solidN++;
+        else if (world.isLand(t)) landN++;
+      }
+      if (solidN >= 2 && landN <= 1 && waterN === 0) {
+        treeCorridors.push({
+          x: tx * TILE_SIZE + TILE_SIZE / 2,
+          y: ty * TILE_SIZE + TILE_SIZE / 2,
+        });
+      }
+    }
+  }
+  assert(
+    treeCorridors.length >= 8,
+    'found tree-corridor traps for roam vibrate test (' + treeCorridors.length + ')'
+  );
+  let treeVibrating = 0;
+  let treeEscapeThrash = 0;
+  const treeSamples = Math.min(24, treeCorridors.length);
+  for (let i = 0; i < treeSamples; i++) {
+    const spot = treeCorridors[i];
+    const wolf = Wildborn.animal.createAnimal('wolf', spot.x, spot.y);
+    wolf.state = 'ROAM';
+    wolf.calories = wolf.maxCalories * 0.75;
+    wolf.spawnX = spot.x;
+    wolf.spawnY = spot.y;
+    const ctx = makeEdgeCtx('tree-novib-' + i);
+    let prevX = wolf.x;
+    let prevY = wolf.y;
+    let prevDx = 0;
+    let prevDy = 0;
+    let reversals = 0;
+    let steps = 0;
+    let pathLen = 0;
+    let prevEscDx = 0;
+    let prevEscDy = 0;
+    let escReversals = 0;
+    let escSamples = 0;
+    for (let f = 0; f < 200; f++) {
+      Wildborn.animal.updateAnimal(wolf, 0.05, ctx);
+      Wildborn.animal.clampToMap(wolf, MAP_PIXEL_SIZE);
+      const esc = wolf._escapeGoal;
+      if (esc) {
+        const edx = esc.x - wolf.x;
+        const edy = esc.y - wolf.y;
+        const elen = Math.hypot(edx, edy);
+        if (elen > TILE_SIZE * 0.5) {
+          if (
+            escSamples > 0 &&
+            Math.hypot(prevEscDx, prevEscDy) > 0.5 &&
+            edx * prevEscDx + edy * prevEscDy < 0
+          ) {
+            escReversals++;
+          }
+          prevEscDx = edx;
+          prevEscDy = edy;
+          escSamples++;
+        }
+      }
+      const dx = wolf.x - prevX;
+      const dy = wolf.y - prevY;
+      const moved = Math.hypot(dx, dy);
+      if (moved > 0.15 && Math.hypot(prevDx, prevDy) > 0.15) {
+        steps++;
+        pathLen += moved;
+        if (dx * prevDx + dy * prevDy < 0) reversals++;
+      }
+      if (moved > 0.05) {
+        prevDx = dx;
+        prevDy = dy;
+      }
+      prevX = wolf.x;
+      prevY = wolf.y;
+    }
+    const net = Math.hypot(wolf.x - spot.x, wolf.y - spot.y);
+    const efficiency = pathLen > 1 ? net / pathLen : 1;
+    if (steps >= 20 && reversals / steps > 0.4 && efficiency < 0.2) treeVibrating++;
+    // Opposite escape headings more than a few times => sticky goal thrash
+    if (escSamples >= 8 && escReversals > 6) treeEscapeThrash++;
+  }
+  assert(
+    treeVibrating === 0,
+    'tree-corridor roamers do not vibrate via rapid reversals (' +
+      treeVibrating +
+      '/' +
+      treeSamples +
+      ')'
+  );
+  assert(
+    treeEscapeThrash === 0,
+    'tree-corridor escape goals do not reverse thrash (' +
+      treeEscapeThrash +
+      '/' +
+      treeSamples +
+      ')'
+  );
+
+  // Territory rim: without return hysteresis, ROAM ↔ walk-home flipped every
+  // frame near TERRITORY_RADIUS and read as vibration against tree lines.
+  {
+    const radius = Wildborn.animal.TERRITORY_RADIUS;
+    let terrVib = 0;
+    let terrSamples = 0;
+    for (let i = 0; i < 16 && terrSamples < 10; i++) {
+      let spot = null;
+      for (let n = 0; n < 80 && !spot; n++) {
+        const tx = 4 + ((i * 41 + n * 17) % (MAP_TILES - 8));
+        const ty = 4 + ((i * 19 + n * 23) % (MAP_TILES - 8));
+        const tile = world.getTile(tx, ty);
+        if (!world.isLand(tile) || world.isSolid(tile) || world.isSlow(tile)) continue;
+        const edgeX = tx * TILE_SIZE + TILE_SIZE / 2 + radius - 4;
+        const edgeY = ty * TILE_SIZE + TILE_SIZE / 2;
+        if (edgeX >= MAP_PIXEL_SIZE - TILE_SIZE) continue;
+        const edgeTile = world.getTileAtPixel(edgeX, edgeY);
+        if (!world.isLand(edgeTile) || world.isSolid(edgeTile) || world.isSlow(edgeTile)) {
+          continue;
+        }
+        spot = {
+          spawnX: tx * TILE_SIZE + TILE_SIZE / 2,
+          spawnY: ty * TILE_SIZE + TILE_SIZE / 2,
+          x: edgeX,
+          y: edgeY,
+        };
+      }
+      if (!spot) continue;
+      terrSamples++;
+      const wolf = Wildborn.animal.createAnimal('wolf', spot.x, spot.y);
+      wolf.state = 'ROAM';
+      wolf.calories = wolf.maxCalories * 0.8;
+      wolf.spawnX = spot.spawnX;
+      wolf.spawnY = spot.spawnY;
+      const ctx = makeEdgeCtx('territory-novib-' + i);
+      let prevX = wolf.x;
+      let prevY = wolf.y;
+      let prevDx = 0;
+      let prevDy = 0;
+      let reversals = 0;
+      let steps = 0;
+      let pathLen = 0;
+      for (let f = 0; f < 180; f++) {
+        Wildborn.animal.updateAnimal(wolf, 0.05, ctx);
+        Wildborn.animal.clampToMap(wolf, MAP_PIXEL_SIZE);
+        const dx = wolf.x - prevX;
+        const dy = wolf.y - prevY;
+        const moved = Math.hypot(dx, dy);
+        if (moved > 0.15 && Math.hypot(prevDx, prevDy) > 0.15) {
+          steps++;
+          pathLen += moved;
+          if (dx * prevDx + dy * prevDy < 0) reversals++;
+        }
+        if (moved > 0.05) {
+          prevDx = dx;
+          prevDy = dy;
+        }
+        prevX = wolf.x;
+        prevY = wolf.y;
+      }
+      const net = Math.hypot(wolf.x - spot.x, wolf.y - spot.y);
+      const efficiency = pathLen > 1 ? net / pathLen : 1;
+      if (steps >= 20 && reversals / steps > 0.4 && efficiency < 0.2) terrVib++;
+    }
+    assert(terrSamples >= 4, 'found territory-rim samples (' + terrSamples + ')');
+    assert(
+      terrVib === 0,
+      'territory-rim roamers do not vibrate via rapid reversals (' +
+        terrVib +
+        '/' +
+        terrSamples +
+        ')'
+    );
+  }
+
   // Tree+water pockets used to accumulate only obstacle time (water timer stayed
   // 0), so canCrossWater never flipped and animals froze on the shoreline.
   const waterTreeTraps = [];
