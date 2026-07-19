@@ -149,7 +149,11 @@ function assert(cond, msg) {
   assert(Wildborn.animal.EAT_RATE_PER_SEC === 5, 'plant eat rate is 5 cal/sec/animal');
   assert(
     Wildborn.animal.PREDATOR_CALORIE_BURN_PER_SEC === 0.1,
-    'predators burn 0.1 cal/sec (1 every 10s)'
+    'predator base burn is 0.1 cal/sec (1 every 10s)'
+  );
+  assert(
+    Wildborn.animal.PREDATOR_CALORIE_BURN_MULT === 1.5,
+    'animal eaters burn calories at 150% rate (50% faster)'
   );
   assert(
     Wildborn.animal.HERBIVORE_CALORIE_BURN_MULT === 0.8,
@@ -231,11 +235,14 @@ function assert(cond, msg) {
   assert(!Wildborn.animal.AI_STATE.SEEK_MATE && !Wildborn.animal.AI_STATE.BREEDING, 'mate-seeking states removed');
 }
 
-// --- Unit: predator flat burn / omnivore ×1.3 / herbivore ÷10 ---
+// --- Unit: animal eater ×1.5 / omnivore ×1.3 / herbivore ÷10 ---
 {
   const tickSec = Wildborn.config.ecosystemTickSeconds || 0.5;
-  const expectedPred = Wildborn.animal.PREDATOR_CALORIE_BURN_PER_SEC * tickSec;
-  const expectedOmni = expectedPred * Wildborn.animal.OMNIVORE_CALORIE_BURN_MULT;
+  const expectedPredBase = Wildborn.animal.PREDATOR_CALORIE_BURN_PER_SEC * tickSec;
+  const expectedPred =
+    expectedPredBase * Wildborn.animal.PREDATOR_CALORIE_BURN_MULT;
+  const expectedOmni =
+    expectedPredBase * Wildborn.animal.OMNIVORE_CALORIE_BURN_MULT;
   const predIds = Object.keys(PREDATOR_SPECIES);
   for (let i = 0; i < predIds.length; i++) {
     const a = Wildborn.animal.createAnimal(predIds[i], 0, 0);
@@ -248,7 +255,12 @@ function assert(cond, msg) {
     } else {
       assert(
         Math.abs(burn - expectedPred) < 0.0001,
-        predIds[i] + ' burn is flat 0.1 cal/s (' + burn + ' /tick, expect ' + expectedPred + ')'
+        predIds[i] +
+          ' animal eater burn is 50% faster (' +
+          burn +
+          ' /tick, expect ' +
+          expectedPred +
+          ')'
       );
     }
   }

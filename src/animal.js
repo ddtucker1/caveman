@@ -267,9 +267,11 @@
   const DAY_TICKS = 120;
   /** Global calorie burn scale — animals previously burned ~10× too fast. */
   const CALORIE_BURN_DIVISOR = 10;
-  /** Herbivores burn calories 20% slower than the scaled daily-need rate. */
+  /** Herbivores (plant eaters) burn calories 20% slower than the scaled daily-need rate. */
   const HERBIVORE_CALORIE_BURN_MULT = 0.8;
-  /** Omnivores burn calories 30% faster than the flat predator rate. */
+  /** Animal eaters (pure predators) burn calories 50% faster than the flat base rate. */
+  const PREDATOR_CALORIE_BURN_MULT = 1.5;
+  /** Omnivores burn calories 30% faster than the flat base predator rate. */
   const OMNIVORE_CALORIE_BURN_MULT = 1.3;
   /** Minimum calories burned per ecosystem tick. */
   const MIN_CALORIE_BURN = 0.5;
@@ -293,7 +295,7 @@
   const FOOD_DETECT_RANGE = 8 * TILE_SIZE;
   /** Plant eating: 5 calories per second per animal (real-time in updateEating). Stacks. */
   const EAT_RATE_PER_SEC = 5;
-  /** Predators burn 1 calorie every 10 seconds (flat rate for all predator species). */
+  /** Base predator burn: 1 calorie every 10 seconds (scaled by diet multipliers). */
   const PREDATOR_CALORIE_BURN_PER_SEC = 0.1;
   /** Corpse transfer rate (calories per ecosystem tick). */
   const EAT_RATE = 6;
@@ -493,22 +495,23 @@
 
   /**
    * Per-tick calorie drain.
-   * Pure predators (wolf/lion/panther/alligator): flat 0.1 cal/sec
-   *   → PREDATOR_CALORIE_BURN_PER_SEC × ecosystemTickSeconds per tick.
+   * Animal eaters / pure predators (wolf/lion/panther/alligator): flat 0.1 cal/sec
+   *   → PREDATOR_CALORIE_BURN_PER_SEC × ecosystemTickSeconds × PREDATOR_CALORIE_BURN_MULT
+   *   (50% faster).
    * Omnivores (bear): same flat base × OMNIVORE_CALORIE_BURN_MULT (30% faster).
-   * Herbivores: (daily need / DAY_TICKS) / 10, rounded to 1 decimal,
+   * Plant eaters / herbivores: (daily need / DAY_TICKS) / 10, rounded to 1 decimal,
    *   then × HERBIVORE_CALORIE_BURN_MULT (20% slower).
    * Floor at MIN_CALORIE_BURN (0.5). Species whose scaled rate is below the floor
    * keep a 2-decimal scaled value so small animals are not forced to burn faster.
    */
   function calorieBurnPerTick(animal) {
-    // Flat predator burn — all PREDATOR_SPECIES; omnivores get +30%
+    // Flat predator burn — all PREDATOR_SPECIES; animal eaters ×1.5, omnivores ×1.3
     if (PREDATOR_SPECIES[animal.species]) {
       const tickSec =
         (Wildborn.config && Wildborn.config.ecosystemTickSeconds) || 0.5;
       const base = PREDATOR_CALORIE_BURN_PER_SEC * tickSec;
       if (animal.diet === 'omnivore') return base * OMNIVORE_CALORIE_BURN_MULT;
-      return base;
+      return base * PREDATOR_CALORIE_BURN_MULT;
     }
     const raw = animal.caloriesNeededPerDay / DAY_TICKS / CALORIE_BURN_DIVISOR;
     const rounded = Math.round(raw * 10) / 10;
@@ -2520,7 +2523,7 @@
       return result;
     }
 
-    // Hunger drain: predators flat 0.1 cal/s; omnivores ×1.3; herbivores ÷10 × 0.8
+    // Hunger drain: animal eaters ×1.5; omnivores ×1.3; plant eaters ÷10 × 0.8
     // Sleeping: conservation mode — half burn
     let drain = calorieBurnPerTick(animal);
     if (animal.state === AI_STATE.SLEEP) drain *= 0.5;
@@ -2631,6 +2634,7 @@
     DAY_TICKS,
     CALORIE_BURN_DIVISOR,
     HERBIVORE_CALORIE_BURN_MULT,
+    PREDATOR_CALORIE_BURN_MULT,
     OMNIVORE_CALORIE_BURN_MULT,
     MIN_CALORIE_BURN,
     PREDATOR_CALORIE_BURN_PER_SEC,
