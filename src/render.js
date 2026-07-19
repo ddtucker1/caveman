@@ -523,7 +523,7 @@
     );
   }
 
-  /** Tiny sprout icon while a depleted plant waits 4800s to respawn elsewhere. */
+  /** Tiny sprout icon while a depleted plant waits 3840s to respawn elsewhere. */
   function drawPlantSprout(ctx, plant, camera) {
     const s = worldToScreen(camera, plant.x, plant.y);
     const progress = Math.max(0, Math.min(1, plant.sproutProgress || 0));

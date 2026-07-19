@@ -29,7 +29,13 @@ for (const f of files) {
 
 const { createRng } = Wildborn.rng;
 const { createWorld, TILE_SIZE, MAP_TILES, MAP_PIXEL_SIZE } = Wildborn.world;
-const { createEcosystem, INITIAL_PLANT_COUNT } = Wildborn.ecosystem;
+const {
+  createEcosystem,
+  INITIAL_PLANT_COUNT,
+  EXTINCTION_REPOPULATE_COUNT,
+  EXTINCTION_REPOPULATE_DELAY_SECONDS,
+  EXTINCTION_REPOPULATE_DELAY_TICKS,
+} = Wildborn.ecosystem;
 const { AI_STATE, HERBIVORE_SPECIES, PREDATOR_SPECIES } = Wildborn.animal;
 const { consumePlant, createPlant, updatePlant, RESPAWN_DELAY_TICKS, RESPAWN_CALORIE_RATIO } =
   Wildborn.plant;
@@ -93,9 +99,9 @@ function assert(cond, msg) {
   const taken = consumePlant(p, 100);
   assert(taken === 10 && !p.alive, 'consumePlant depletes and kills plant (stays in memory)');
   assert(p.growthPaused === true, 'eating pauses plant growth');
-  assert(p.respawnTimer === RESPAWN_DELAY_TICKS, 'respawn timer starts at 4800s (9600 ticks)');
-  assert(RESPAWN_DELAY_TICKS === 9600, 'RESPAWN_DELAY_TICKS is 9600');
-  assert(Wildborn.plant.RESPAWN_DELAY_SECONDS === 4800, 'RESPAWN_DELAY_SECONDS is 4800');
+  assert(p.respawnTimer === RESPAWN_DELAY_TICKS, 'respawn timer starts at 3840s (7680 ticks)');
+  assert(RESPAWN_DELAY_TICKS === 7680, 'RESPAWN_DELAY_TICKS is 7680');
+  assert(Wildborn.plant.RESPAWN_DELAY_SECONDS === 3840, 'RESPAWN_DELAY_SECONDS is 3840');
   // Fast-forward respawn
   p.respawnTimer = 1;
   updatePlant(p, () => ({ x: 50, y: 50 }));
@@ -1301,6 +1307,61 @@ function assert(cond, msg) {
   assert(Wildborn.config.maxAnimals === undefined, 'no maxAnimals population cap');
 
   console.log('\nFinal stats:', JSON.stringify(afterStats, null, 2));
+}
+
+// --- Unit: extinction repopulation — 10 min delay then 4 of the species ---
+{
+  assert(EXTINCTION_REPOPULATE_COUNT === 4, 'extinction repopulates with 4 animals');
+  assert(EXTINCTION_REPOPULATE_DELAY_SECONDS === 600, 'extinction delay is 600s (10 min)');
+  assert(EXTINCTION_REPOPULATE_DELAY_TICKS === 1200, 'extinction delay is 1200 ticks');
+
+  const world = createWorld('extinction-repop');
+  world.ensureMapLoaded();
+  const eco = createEcosystem({
+    world: world,
+    rng: createRng('extinction-repop'),
+    config: Object.assign({}, Wildborn.config, { ecosystemTickSeconds: 0.5 }),
+    origin: { x: MAP_PIXEL_SIZE / 2, y: MAP_PIXEL_SIZE / 2 },
+  });
+
+  // Wipe panthers (leave corpses out of the array so ticks stay cheap)
+  for (let i = eco.animals.length - 1; i >= 0; i--) {
+    if (eco.animals[i].species === 'panther') eco.animals.splice(i, 1);
+  }
+  assert(
+    eco.animals.every((a) => a.species !== 'panther'),
+    'panthers removed to simulate extinction'
+  );
+
+  // Also drop every other animal so the 10-minute wait is a cheap empty tick loop
+  eco.animals.length = 0;
+
+  for (let i = 0; i < EXTINCTION_REPOPULATE_DELAY_TICKS - 1; i++) {
+    eco.update(0.5);
+  }
+  let panthers = eco.animals.filter((a) => a.species === 'panther' && a.alive);
+  assert(panthers.length === 0, 'no panther respawn before 10 minutes');
+
+  eco.update(0.5);
+  panthers = eco.animals.filter((a) => a.species === 'panther' && a.alive);
+  assert(
+    panthers.length === EXTINCTION_REPOPULATE_COUNT,
+    'exactly 4 panthers spawn after 10 minutes (' + panthers.length + ')'
+  );
+
+  // Spot-check another wiped species also recovered
+  const rabbits = eco.animals.filter((a) => a.species === 'rabbit' && a.alive);
+  assert(
+    rabbits.length === EXTINCTION_REPOPULATE_COUNT,
+    'other extinct species also repopulate with 4 (' + rabbits.length + ' rabbits)'
+  );
+
+  // Positions should not all be identical (random locations)
+  const unique = {};
+  for (let i = 0; i < panthers.length; i++) {
+    unique[Math.round(panthers[i].x) + ',' + Math.round(panthers[i].y)] = true;
+  }
+  assert(Object.keys(unique).length > 1, 'repopulated animals spawn at varied locations');
 }
 
 // --- Unit: population is uncapped — breeding accepts offspring past prior soft-cap ---
