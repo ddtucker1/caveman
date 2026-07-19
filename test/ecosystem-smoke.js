@@ -1949,6 +1949,79 @@ function assert(cond, msg) {
   }
 }
 
+// --- Unit: view radius config (graphics cull; sim continues) ---
+{
+  assert(
+    Wildborn.config.viewRadiusTiles === 20,
+    'view radius is 20 tiles in all directions'
+  );
+}
+
+// --- Unit: player melee attack + animal counter-attack ---
+{
+  const { createPlayer, tryPlayerAttack, damagePlayer } = Wildborn.player;
+  const player = createPlayer({ x: 100, y: 100 });
+  const rabbit = Wildborn.animal.createAnimal('rabbit', 120, 115);
+  const beforeHp = rabbit.health;
+
+  const result = tryPlayerAttack(player, { animals: [rabbit] });
+  assert(result.swung === true, 'player swing starts on mouse-tap attack');
+  assert(result.hit === rabbit, 'player melee hits nearby animal');
+  assert(rabbit.health < beforeHp, 'animal takes damage from player swing');
+  assert(rabbit._counterAttack === true, 'hit animal enters counter-attack');
+  assert(rabbit.target === player, 'hit animal targets the player');
+  assert(player.attackCooldown > 0, 'player attack enters cooldown');
+  assert(player.swingTimer > 0, 'player swing animation starts');
+
+  // Too far → swing still happens but no hit
+  const far = Wildborn.animal.createAnimal('deer', 800, 800);
+  player.attackCooldown = 0;
+  const miss = tryPlayerAttack(player, { animals: [far] });
+  assert(miss.swung === true && miss.hit == null, 'swing misses animals outside melee range');
+}
+
+// --- Unit: hunting predators attack the player ---
+{
+  const player = Wildborn.player.createPlayer({ x: 200, y: 200 });
+  const wolf = Wildborn.animal.createAnimal('wolf', 220, 200);
+  wolf.calories = wolf.maxCalories * 0.3;
+  wolf._hunting = true;
+  wolf.state = 'SEEK_PREY';
+  wolf.target = null;
+
+  const ctx = {
+    rng: createRng('hunt-player'),
+    tickSeconds: 0.5,
+    player: player,
+    isWater: () => false,
+    findNearestAnimal: () => null,
+    findNearestPlant: () => null,
+    queryAnimals: () => [],
+  };
+
+  Wildborn.animal.updateAnimal(wolf, 0.1, ctx);
+  assert(wolf.target === player, 'hunting predator targets the player when in range');
+  assert(wolf.state === 'SEEK_PREY', 'predator stays in hunt while chasing player');
+
+  // Close enough to bite
+  wolf.x = player.x + player.w / 2 + 10;
+  wolf.y = player.y + player.h / 2;
+  wolf.attackCooldown = 0;
+  const hpBefore = player.hp;
+  Wildborn.animal.updateAnimal(wolf, 0.1, ctx);
+  assert(player.hp < hpBefore, 'hunting predator damages the player in melee');
+}
+
+// --- Unit: predator hit by player keeps attacking player ---
+{
+  const player = Wildborn.player.createPlayer({ x: 50, y: 50 });
+  const bear = Wildborn.animal.createAnimal('bear', 60, 50);
+  Wildborn.animal.applyDamage(bear, 15, player);
+  assert(bear.state === 'SEEK_PREY', 'predator seeks player after being hit');
+  assert(bear.target === player, 'predator targets player after being hit');
+  assert(bear._hunting === true, 'predator enters hunt mode after player hit');
+}
+
 if (failed) {
   console.error('\n' + failed + ' assertion(s) failed');
   process.exit(1);

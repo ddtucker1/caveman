@@ -7,7 +7,7 @@
   const config = Wildborn.config;
   const { createRng, randomSeedString } = Wildborn.rng;
   const { createWorld, TILE_SIZE, MAP_PIXEL_SIZE } = Wildborn.world;
-  const { createPlayer, updatePlayer, findSpawn } = Wildborn.player;
+  const { createPlayer, updatePlayer, findSpawn, tryPlayerAttack } = Wildborn.player;
   const {
     createCamera,
     updateCamera,
@@ -303,8 +303,11 @@
     if (s === 'DEAD') return 'Dead';
     if (s === 'SLEEP') return 'Sleeping';
     if (s === 'EATING') return 'Eating';
-    if (s === 'FLEE') return 'Fleeing';
-    if (s === 'SEEK_PREY' || entity._hunting) return 'Hunting';
+    if (s === 'FLEE') return entity._counterAttack ? 'Attacking' : 'Fleeing';
+    if (s === 'SEEK_PREY' || entity._hunting) {
+      if (entity.target && entity.target.kind === 'player') return 'Hunting player';
+      return 'Hunting';
+    }
     if (s === 'SEEK_FOOD' || entity._hungerSearch) return 'Searching for Food';
     if (s === 'ROAM') return 'Roaming';
     if (s === 'IDLE') return 'Idle';
@@ -356,15 +359,18 @@
       let targetName = '—';
       if (
         (entity._hunting || entity.state === 'SEEK_PREY' || entity.state === 'SEEK_FOOD') &&
-        entity.target &&
-        entity.target.kind === 'animal'
+        entity.target
       ) {
-        const tDef = Wildborn.shapes.getSpeciesDef(entity.target.species);
-        targetName =
-          (tDef && tDef.label) ||
-          entity.target.label ||
-          entity.target.species ||
-          '—';
+        if (entity.target.kind === 'player') {
+          targetName = 'Caveman';
+        } else if (entity.target.kind === 'animal') {
+          const tDef = Wildborn.shapes.getSpeciesDef(entity.target.species);
+          targetName =
+            (tDef && tDef.label) ||
+            entity.target.label ||
+            entity.target.species ||
+            '—';
+        }
       }
       html += inspRow('Hunt target', targetName);
     }
@@ -564,24 +570,50 @@
   });
 
   canvas.addEventListener('mousedown', function (e) {
-    if (state !== 'playing' || config.showMinimap === false || !game.world || !game.camera) {
-      return;
-    }
-    if (e.button !== 0) return;
+    if (state !== 'playing') return;
+
     const rect = canvas.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
-    const layout = getMinimapLayout(window.innerWidth, window.innerHeight, game.world);
-    const vp = getMinimapViewportRect(layout, game.camera);
-    if (!pointInRect(mx, my, vp)) return;
 
-    game.minimapDrag = {
-      grabOffsetX: mx - vp.x,
-      grabOffsetY: my - vp.y,
-    };
-    game.camera.followPlayer = false;
-    canvas.style.cursor = 'move';
-    e.preventDefault();
+    // Minimap drag (left button only)
+    if (
+      e.button === 0 &&
+      config.showMinimap !== false &&
+      game.world &&
+      game.camera
+    ) {
+      const layout = getMinimapLayout(window.innerWidth, window.innerHeight, game.world);
+      const vp = getMinimapViewportRect(layout, game.camera);
+      if (pointInRect(mx, my, vp)) {
+        game.minimapDrag = {
+          grabOffsetX: mx - vp.x,
+          grabOffsetY: my - vp.y,
+        };
+        game.camera.followPlayer = false;
+        canvas.style.cursor = 'move';
+        e.preventDefault();
+        return;
+      }
+    }
+
+    // Left click — swing weapon / attack nearby animals
+    if (e.button === 0 && game.player && game.player.alive) {
+      // Ignore clicks on the minimap body (not just the viewport rect)
+      if (config.showMinimap !== false && game.world && game.camera) {
+        const layout = getMinimapLayout(window.innerWidth, window.innerHeight, game.world);
+        if (
+          mx >= layout.x &&
+          my >= layout.y &&
+          mx <= layout.x + layout.size &&
+          my <= layout.y + layout.size
+        ) {
+          return;
+        }
+      }
+      tryPlayerAttack(game.player, game.ecosystem);
+      e.preventDefault();
+    }
   });
 
   window.addEventListener('mouseup', function () {
@@ -591,13 +623,14 @@
     }
   });
 
-  canvas.addEventListener('click', function (e) {
+  // Right-click — inspect entity under cursor
+  canvas.addEventListener('contextmenu', function (e) {
+    e.preventDefault();
     if (state !== 'playing' || !game.ecosystem || !config.ecosystemEnabled) return;
     const rect = canvas.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
 
-    // Ignore clicks that started (or landed) on the minimap viewport / map area.
     if (config.showMinimap !== false && game.world && game.camera) {
       const layout = getMinimapLayout(window.innerWidth, window.innerHeight, game.world);
       if (
@@ -610,7 +643,13 @@
       }
     }
 
-    const hit = pickEntityAt(game.ecosystem, game.camera, mx, my);
+    const hit = pickEntityAt(
+      game.ecosystem,
+      game.camera,
+      mx,
+      my,
+      game.player
+    );
     if (hit) {
       openInspector(hit);
     } else {
@@ -717,7 +756,8 @@
         game.ecosystem,
         game.camera,
         game.mouseX,
-        game.mouseY
+        game.mouseY,
+        game.player
       );
     } else {
       game.hoverEntity = null;
@@ -743,7 +783,7 @@
     const w = window.innerWidth;
     const h = window.innerHeight;
     clear(ctx, w, h);
-    drawWorld(ctx, game.world, game.camera, game.time);
+    drawWorld(ctx, game.world, game.camera, game.time, game.player);
 
     if (game.ecosystem && config.ecosystemEnabled) {
       drawEcosystem(ctx, game.ecosystem, game.camera, {
@@ -751,6 +791,7 @@
         showDebug: game.showEcosystemDebug,
         showHuntLines: game.showEcosystemDebug,
         hoverEntity: game.hoverEntity,
+        player: game.player,
       });
     }
 

@@ -1424,19 +1424,38 @@
   }
 
   function applyDamage(target, amount, attacker) {
+    if (!target) return 0;
+
+    // Player takes damage through the player helper (hp / alive sync).
+    if (target.kind === 'player') {
+      if (Wildborn.player && typeof Wildborn.player.damagePlayer === 'function') {
+        return Wildborn.player.damagePlayer(target, amount);
+      }
+      if (!target.alive) return 0;
+      const dmg = Math.max(0, amount || 0);
+      target.hp = Math.max(0, (target.hp != null ? target.hp : target.health) - dmg);
+      target.health = target.hp;
+      if (target.hp <= 0) target.alive = false;
+      return dmg;
+    }
+
     if (!target.alive || target.state === AI_STATE.DEAD) return 0;
     const dmg = amount;
     target.health -= dmg;
     if (target.health <= 0) {
-      killAnimal(target, attacker);
+      killAnimal(target, attacker && attacker.kind === 'player' ? null : attacker);
+      // Player kills leave a corpse; do not force the player into EATING.
       return dmg;
     }
+
+    const hitByPlayer = attacker && attacker.kind === 'player';
+
     // Predators never get scared of prey — keep attacking until the target is dead.
     if (isPredator(target)) {
       target.fleeFrom = null;
-      target._counterAttack = false;
-      if (attacker && attacker.alive && attacker.state !== AI_STATE.DEAD) {
+      if (attacker && isLivingCombatTarget(attacker)) {
         target.target = attacker;
+        target._counterAttack = !!hitByPlayer;
         if (target.state !== AI_STATE.EATING) {
           target.state = AI_STATE.SEEK_PREY;
           target._hunting = true;
@@ -1444,11 +1463,43 @@
       }
       return dmg;
     }
-    // Herbivores always flee when hit
+
+    // Herbivores attacked by the player fight back; otherwise they flee predators.
+    if (hitByPlayer && isLivingCombatTarget(attacker)) {
+      target._counterAttack = true;
+      target.target = attacker;
+      target.fleeFrom = attacker;
+      target.state = AI_STATE.FLEE;
+      target.stateTimer = 3.5;
+      return dmg;
+    }
+
+    // Herbivores always flee when hit by animals
     target.state = AI_STATE.FLEE;
     target.fleeFrom = attacker;
+    target._counterAttack = false;
     target.stateTimer = 2.5;
     return dmg;
+  }
+
+  /** True if the entity can be chased / hit in combat. */
+  function isLivingCombatTarget(t) {
+    if (!t) return false;
+    if (t.kind === 'player') {
+      return t.alive !== false && (t.hp == null || t.hp > 0);
+    }
+    return !!(t.alive && t.state !== AI_STATE.DEAD);
+  }
+
+  function targetPos(t) {
+    if (!t) return { x: 0, y: 0 };
+    if (t.kind === 'player') {
+      return {
+        x: t.x + (t.w || 0) / 2,
+        y: t.y + (t.h || 0) / 2,
+      };
+    }
+    return { x: t.x, y: t.y };
   }
 
   function killAnimal(animal, killer) {
@@ -1462,7 +1513,8 @@
     animal.corpseDecay = CORPSE_DECAY_TICKS; // 1 minute onscreen
     animal.deadAt = null; // render sets wall-clock time on first draw
     animal.target = null;
-    if (killer && killer.alive) {
+    animal._counterAttack = false;
+    if (killer && killer.alive && killer.kind !== 'player') {
       // Killer may immediately start eating
       killer.target = animal;
       killer.state = AI_STATE.EATING;
@@ -1842,11 +1894,15 @@
     animal._exploreGoal = null;
 
     const t = animal.target;
-    const range = t.kind === 'plant' || t.state === AI_STATE.DEAD ? EAT_RANGE : ATTACK_RANGE;
-    const d2 = dist2(animal.x, animal.y, t.x, t.y);
+    const tp = targetPos(t);
+    const range =
+      t.kind === 'plant' || t.state === AI_STATE.DEAD
+        ? EAT_RANGE
+        : ATTACK_RANGE;
+    const d2 = dist2(animal.x, animal.y, tp.x, tp.y);
 
     if (d2 <= range * range) {
-      if (t.kind === 'animal' && t.alive && t.state !== AI_STATE.DEAD) {
+      if (t.kind === 'player' || (t.kind === 'animal' && t.alive && t.state !== AI_STATE.DEAD)) {
         tryAttack(animal, t, ctx);
       } else {
         animal.state = AI_STATE.EATING;
@@ -1855,7 +1911,7 @@
     }
 
     // Pathfind with no max range — hunger/hunt search may cross the whole map.
-    moveToward(animal, t.x, t.y, dt, 1, ctx);
+    moveToward(animal, tp.x, tp.y, dt, 1, ctx);
   }
 
   /**
@@ -1897,6 +1953,12 @@
 
   function isValidFoodTarget(animal, t) {
     if (!t) return false;
+    if (t.kind === 'player') {
+      // Hunting predators (and anything already counter-attacking the player) chase the caveman.
+      if (!isLivingCombatTarget(t)) return false;
+      if (animal._counterAttack && animal.target === t) return true;
+      return isPredator(animal) && !!animal._hunting;
+    }
     if (t.kind === 'plant') return animal.diet === 'herbivore' && t.alive && t.calories > 0;
     if (t.kind === 'animal') {
       // Herbivores never eat animals (living or dead) — plants only.
@@ -1941,6 +2003,15 @@
       animal.state === AI_STATE.SEEK_PREY ||
       animal._hunting
     ) {
+      // Hunting predators attack the player when in detect range.
+      const player = ctx.player;
+      let playerDist2 = Infinity;
+      if (animal._hunting && player && isLivingCombatTarget(player)) {
+        const pp = targetPos(player);
+        playerDist2 = dist2(animal.x, animal.y, pp.x, pp.y);
+        if (playerDist2 > detect * detect) playerDist2 = Infinity;
+      }
+
       const prey = ctx.findNearestAnimal(
         animal.x,
         animal.y,
@@ -1949,6 +2020,13 @@
           return o.alive && o.diet === 'herbivore' && o.id !== animal.id;
         }
       );
+      const preyDist2 = prey
+        ? dist2(animal.x, animal.y, prey.x, prey.y)
+        : Infinity;
+
+      if (playerDist2 < Infinity && playerDist2 <= preyDist2) {
+        return player;
+      }
       if (prey) return prey;
 
       // Desperate predators: attack other predators (same or different species) at ≤25%
@@ -1986,13 +2064,13 @@
     applyDamage(prey, attacker.attackPower, attacker);
     attacker.attackCooldown = ATTACK_COOLDOWN_TICKS * (ctx.tickSeconds || 0.5);
 
-    // Counter-attack
-    if (prey.alive && prey._counterAttack) {
+    // Counter-attack between animals only (player swings are separate).
+    if (prey && prey.kind !== 'player' && prey.alive && prey._counterAttack) {
       applyDamage(attacker, prey.attackPower * 0.8, prey);
       prey._counterAttack = false;
     }
 
-    if (!prey.alive || prey.state === AI_STATE.DEAD) {
+    if (prey && prey.kind !== 'player' && (!prey.alive || prey.state === AI_STATE.DEAD)) {
       attacker.state = AI_STATE.EATING;
       attacker.target = prey;
     }
@@ -2171,7 +2249,7 @@
       const threat = animal.fleeFrom || animal.target;
       animal.fleeFrom = null;
       animal._counterAttack = false;
-      if (threat && threat.alive && threat.state !== AI_STATE.DEAD) {
+      if (threat && isLivingCombatTarget(threat)) {
         animal.target = threat;
         animal.state = AI_STATE.SEEK_PREY;
         animal._hunting = true;
@@ -2181,32 +2259,40 @@
       return;
     }
 
-    // Counter-attack styles engage instead of pure flee
-    if (animal._counterAttack && animal.target && animal.target.alive) {
+    // Counter-attack styles engage instead of pure flee (includes player fights).
+    if (animal._counterAttack && animal.target && isLivingCombatTarget(animal.target)) {
       const t = animal.target;
-      const d2 = dist2(animal.x, animal.y, t.x, t.y);
+      const tp = targetPos(t);
+      const d2 = dist2(animal.x, animal.y, tp.x, tp.y);
       if (d2 <= ATTACK_RANGE * ATTACK_RANGE) {
         tryAttack(animal, t, ctx);
       } else {
-        moveToward(animal, t.x, t.y, dt, 1.1, ctx);
+        moveToward(animal, tp.x, tp.y, dt, 1.1, ctx);
       }
       if (animal.stateTimer <= 0) {
-        animal._counterAttack = false;
-        animal.state = defaultRestState(animal);
+        // After a brief fight-back, keep pressuring the player a bit longer if close;
+        // otherwise resume normal behavior.
+        if (t.kind === 'player' && d2 < FLEE_SAFE_RANGE * FLEE_SAFE_RANGE) {
+          animal.stateTimer = 1.5;
+        } else {
+          animal._counterAttack = false;
+          animal.state = defaultRestState(animal);
+        }
       }
       return;
     }
 
     const threat = animal.fleeFrom;
-    if (!threat || !threat.alive) {
+    if (!threat || !isLivingCombatTarget(threat)) {
       animal.fleeFrom = null;
       animal.state = defaultRestState(animal);
       return;
     }
 
-    const dist = Math.hypot(animal.x - threat.x, animal.y - threat.y);
+    const tp = targetPos(threat);
+    const dist = Math.hypot(animal.x - tp.x, animal.y - tp.y);
 
-    // Herbivores: keep fleeing until predator is 200px+ away (normal speed)
+    // Herbivores: keep fleeing until predator is far enough away
     if (animal.diet === 'herbivore') {
       if (dist >= FLEE_SAFE_RANGE) {
         animal.fleeFrom = null;
@@ -2214,8 +2300,8 @@
         return;
       }
 
-      const dx = animal.x - threat.x;
-      const dy = animal.y - threat.y;
+      const dx = animal.x - tp.x;
+      const dy = animal.y - tp.y;
       const len = Math.hypot(dx, dy) || 1;
       const tx = animal.x + (dx / len) * 80;
       const ty = animal.y + (dy / len) * 80;
@@ -2230,8 +2316,8 @@
       return;
     }
 
-    const dx = animal.x - threat.x;
-    const dy = animal.y - threat.y;
+    const dx = animal.x - tp.x;
+    const dy = animal.y - tp.y;
     const len = Math.hypot(dx, dy) || 1;
     const tx = animal.x + (dx / len) * 80;
     const ty = animal.y + (dy / len) * 80;
@@ -2410,5 +2496,8 @@
     findNearbyEscape,
     getStickyEscape,
     tryUnstick,
+    isLivingCombatTarget,
+    targetPos,
+    ATTACK_RANGE,
   };
 })(typeof window !== 'undefined' ? window : globalThis);
