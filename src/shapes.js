@@ -206,20 +206,6 @@
         legs: 'four_short',
         features: ['hex_shell'],
       },
-      lizard: {
-        label: 'Lizard',
-        category: 'herbivore',
-        bodyColor: '#4a9a4a',
-        bellyColor: '#7aba5a',
-        tongueColor: '#c04060',
-        eyeColor: '#ffffff',
-        size: 7,
-        body: 'long_thin_oval',
-        ears: 'none',
-        tail: 'long_taper',
-        legs: 'four_short',
-        features: ['tongue_flick'],
-      },
     },
     predators: {
       wolf: {

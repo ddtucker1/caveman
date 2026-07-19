@@ -83,7 +83,6 @@
     bison: '🦬',
     ostrich: '🦤',
     turtle: '🐢',
-    lizard: '🦎',
     wolf: '🐺',
     lion: '🦁',
     panther: '🐆',
