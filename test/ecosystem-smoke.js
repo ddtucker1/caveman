@@ -212,12 +212,21 @@ function assert(cond, msg) {
     Wildborn.animal.OMNIVORE_ATTACK_OWN_SPECIES_RATIO === 0.1,
     'omnivores attack own species at 10% calories'
   );
+  assert(
+    Wildborn.animal.OMNIVORE_BREED_COOLDOWN === Wildborn.animal.BREED_COOLDOWN * 2,
+    'omnivore breed cooldown is double base (2400 ticks)'
+  );
   assert(wolf.state === 'ROAM', 'predators spawn in ROAM state');
   assert(wolf.spawnX === 0 && wolf.spawnY === 0, 'predator records spawn territory point');
   const cub = Wildborn.animal.createAnimal('deer', 0, 0, { isOffspring: true });
   assert(cub.isAdult && cub.health === cub.maxHealth, 'offspring born as full-health adults');
   assert(cub.growth === 1 && cub.size === cub.baseSize, 'offspring spawn at full adult size');
   assert(cub.breedingCooldown === Wildborn.animal.BREED_COOLDOWN, 'offspring start on breed cooldown');
+  const bearCub = Wildborn.animal.createAnimal('bear', 0, 0, { isOffspring: true });
+  assert(
+    bearCub.breedingCooldown === Wildborn.animal.OMNIVORE_BREED_COOLDOWN,
+    'omnivore offspring start on doubled breed cooldown'
+  );
   assert(!HERBIVORE_SPECIES.chicken, 'chicken species removed');
   assert(!Wildborn.animal.AI_STATE.SEEK_MATE && !Wildborn.animal.AI_STATE.BREEDING, 'mate-seeking states removed');
 }
@@ -1755,6 +1764,22 @@ function assert(cond, msg) {
   assert(kids[0].growth === 1 && kids[0].size === kids[0].baseSize, 'offspring starts at full size');
   assert(deerA.breedingCooldown === Wildborn.animal.BREED_COOLDOWN, 'breeding cooldown applied');
   assert(!Wildborn.animal.canBreed(deerA), 'parent cannot breed again until cooldown ends');
+
+  // Omnivores use a doubled reproduction cooldown
+  const bearA = Wildborn.animal.createAnimal('bear', 120, 120);
+  bearA.calories = bearA.maxCalories;
+  bearA.breedingCooldown = 0;
+  assert(Wildborn.animal.canBreed(bearA), 'well-fed omnivore with cooldown 0 can breed');
+  const bearKids = Wildborn.animal.breed(bearA);
+  assert(bearKids.length === 1, 'omnivore breed() yields exactly 1 offspring');
+  assert(
+    bearA.breedingCooldown === Wildborn.animal.OMNIVORE_BREED_COOLDOWN,
+    'omnivore parent gets doubled breeding cooldown'
+  );
+  assert(
+    bearKids[0].breedingCooldown === Wildborn.animal.OMNIVORE_BREED_COOLDOWN,
+    'omnivore offspring starts on doubled breed cooldown'
+  );
 
   // Ecosystem asexual path: one fertile adult reproduces on the next tick without a mate
   const beforeCount = eco.animals.length;
