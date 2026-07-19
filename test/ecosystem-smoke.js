@@ -196,6 +196,14 @@ function assert(cond, msg) {
   assert(bear.baseSpeed === Wildborn.animal.PREDATOR_LAND_SPEED, 'omnivores use predator land speed 36');
   assert(bear.defense === 'none', 'omnivore predators also never flee by default');
   assert(Wildborn.animal.OMNIVORE_HUNT_RATIO === 0.5, 'omnivores hunt at 50% calories');
+  assert(
+    Wildborn.animal.OMNIVORE_ATTACK_OTHER_SPECIES_RATIO === 0.25,
+    'omnivores attack other omnivore species at 25% calories'
+  );
+  assert(
+    Wildborn.animal.OMNIVORE_ATTACK_OWN_SPECIES_RATIO === 0.1,
+    'omnivores attack own species at 10% calories'
+  );
   assert(wolf.state === 'ROAM', 'predators spawn in ROAM state');
   assert(wolf.spawnX === 0 && wolf.spawnY === 0, 'predator records spawn territory point');
   const cub = Wildborn.animal.createAnimal('deer', 0, 0, { isOffspring: true });
@@ -1461,6 +1469,87 @@ function assert(cond, msg) {
   const prevRadius = bear._searchRadius;
   Wildborn.animal.updateAnimal(bear, 1, ctx);
   assert(bear._searchRadius > prevRadius, 'omnivore expands prey search across the map');
+}
+
+// --- Unit: omnivore attacks other/own species by calorie desperation ---
+{
+  const bear = Wildborn.animal.createAnimal('bear', 100, 100);
+  const otherBear = Wildborn.animal.createAnimal('bear', 130, 100);
+  // Stand-in for a second omnivore species (only bear exists today).
+  const otherOmnivore = Wildborn.animal.createAnimal('wolf', 160, 100);
+  otherOmnivore.diet = 'omnivore';
+
+  function makeCtx(candidates) {
+    return {
+      rng: createRng('omnivore-rival'),
+      tickSeconds: 0.5,
+      isWater: () => false,
+      findNearestPlant: () => null,
+      findNearestAnimal(x, y, r, pred) {
+        let best = null;
+        let bestD2 = Infinity;
+        for (const a of candidates) {
+          if (!pred(a)) continue;
+          const d2 = (a.x - x) * (a.x - x) + (a.y - y) * (a.y - y);
+          if (d2 <= r * r && d2 < bestD2) {
+            best = a;
+            bestD2 = d2;
+          }
+        }
+        return best;
+      },
+      queryAnimals: () => candidates,
+      spawnSplash: () => {},
+    };
+  }
+
+  // At 30%: hunting herbivores only — not other omnivores yet
+  bear.calories = bear.maxCalories * 0.3;
+  bear.state = 'SEEK_PREY';
+  bear._hunting = true;
+  bear.target = null;
+  Wildborn.animal.updateAnimal(bear, 0.1, makeCtx([otherBear, otherOmnivore]));
+  assert(
+    bear.target !== otherBear && bear.target !== otherOmnivore,
+    'omnivore above 25% does not target other omnivores'
+  );
+
+  // At 25%: attack other omnivore species, but not own species
+  bear.calories = bear.maxCalories * 0.25;
+  bear.target = null;
+  Wildborn.animal.updateAnimal(bear, 0.1, makeCtx([otherBear, otherOmnivore]));
+  assert(bear.target === otherOmnivore, 'omnivore at ≤25% targets other omnivore species');
+  assert(bear.target !== otherBear, 'omnivore at 25% does not target own species');
+
+  // Own species alone at 25% is ignored
+  bear.target = null;
+  Wildborn.animal.updateAnimal(bear, 0.1, makeCtx([otherBear]));
+  assert(bear.target !== otherBear, 'omnivore at 25% ignores own species when alone');
+
+  // At 10%: attack own species
+  bear.calories = bear.maxCalories * 0.1;
+  bear.target = null;
+  Wildborn.animal.updateAnimal(bear, 0.1, makeCtx([otherBear]));
+  assert(bear.target === otherBear, 'omnivore at ≤10% targets own species for food');
+
+  // At 10% with both present: prefers other species (checked first)
+  bear.target = null;
+  Wildborn.animal.updateAnimal(bear, 0.1, makeCtx([otherBear, otherOmnivore]));
+  assert(
+    bear.target === otherOmnivore,
+    'omnivore at ≤10% still prefers other omnivore species when available'
+  );
+
+  // Close-range attack actually lands on own-species rival at 10%
+  otherBear.x = bear.x + 10;
+  otherBear.y = bear.y;
+  const hpBefore = otherBear.health;
+  bear.calories = bear.maxCalories * 0.1;
+  bear.target = null;
+  bear.attackCooldown = 0;
+  Wildborn.animal.updateAnimal(bear, 0.1, makeCtx([otherBear]));
+  assert(bear.target === otherBear, 'starving omnivore locks onto nearby own-species rival');
+  assert(otherBear.health < hpBefore, 'omnivore at ≤10% attacks own species');
 }
 
 // --- Unit: shape defs cover every species + renderShape is callable ---
