@@ -68,8 +68,6 @@
 
     const plants = [];
     const animals = [];
-    /** Visual-only brown pixels from roaming predators. */
-    const poops = [];
     /** Short-lived white splash dots when animals move through water. */
     const splashes = [];
 
@@ -524,14 +522,6 @@
         queryAnimalsNear: function (x, y, radius) {
           return animalGrid.queryRadius(x, y, radius);
         },
-        spawnPoop: function (x, y) {
-          poops.push({
-            x: x + rng.range(-3, 3),
-            y: y + rng.range(-3, 3),
-            life: 30,
-            maxLife: 30,
-          });
-        },
         spawnSplash: function (x, y) {
           if (splashCooldown > 0) return;
           splashCooldown = 0.04;
@@ -586,11 +576,7 @@
         if (a.alive) clampToMap(a, mapPixelSize);
       }
 
-      // Visual particles (poop fade + splash motion)
-      for (let i = poops.length - 1; i >= 0; i--) {
-        poops[i].life -= dt;
-        if (poops[i].life <= 0) poops.splice(i, 1);
-      }
+      // Visual particles (splash motion)
       for (let i = splashes.length - 1; i >= 0; i--) {
         const s = splashes[i];
         s.life -= dt;
@@ -721,7 +707,6 @@
         predTotal: predTotal,
         avgCalories: avgCalories,
         corpses: corpses,
-        poops: poops.length,
         animalTotal: animals.length,
         mapTiles: mapTiles,
       };
@@ -739,7 +724,6 @@
     return {
       plants: plants,
       animals: animals,
-      poops: poops,
       splashes: splashes,
       update: update,
       getDebugStats: getDebugStats,

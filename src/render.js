@@ -431,17 +431,6 @@
       drawPlantSprite(ctx, p, camera, time);
     }
 
-    // Predator poop (visual only)
-    const poops = ecosystem.poops || [];
-    for (let i = 0; i < poops.length; i++) {
-      const p = poops[i];
-      if (p.x < x0 || p.x > x1 || p.y < y0 || p.y > y1) continue;
-      const s = worldToScreen(camera, p.x, p.y);
-      const alpha = Math.max(0, Math.min(1, p.life / (p.maxLife || 30)));
-      ctx.fillStyle = 'rgba(92, 58, 28, ' + (0.55 * alpha) + ')';
-      ctx.fillRect(s.x - 1, s.y - 1, 3, 3);
-    }
-
     const animals = ecosystem.animals;
     // Pass 1: hunt lines under sprites (hover/debug only)
     if (showHuntLines || view.hoverEntity) {
@@ -523,7 +512,7 @@
     );
   }
 
-  /** Tiny sprout icon while a depleted plant waits 3840s to respawn elsewhere. */
+  /** Tiny sprout icon while a depleted plant waits 3072s to respawn elsewhere. */
   function drawPlantSprout(ctx, plant, camera) {
     const s = worldToScreen(camera, plant.x, plant.y);
     const progress = Math.max(0, Math.min(1, plant.sproutProgress || 0));
@@ -578,9 +567,6 @@
       animal.target.kind === 'animal' &&
       animal.target.alive;
     const fleeing = animal.state === 'FLEE' && !animal._counterAttack;
-    const attacking =
-      (animal.state === 'FLEE' && animal._counterAttack) ||
-      (hunting && animal.attackCooldown > 0);
     const rearUp =
       animal.species === 'bear' &&
       hunting &&
@@ -628,7 +614,6 @@
         hunting: hunting,
         stalking: false,
         fleeing: fleeing,
-        attacking: attacking,
         eating: animal.state === 'EATING',
         eatBobPhase: animal.eatBobPhase || 0,
         eatLocked: !!animal.eatLocked,

@@ -304,11 +304,6 @@
    */
   const HUNGER_EXPLORE_GOAL_MIN = 22;
   const HUNGER_EXPLORE_GOAL_MAX = 40;
-  /** Poop while roaming: every 5–10s, fade after 30s. */
-  const POOP_INTERVAL_MIN = 5;
-  const POOP_INTERVAL_MAX = 10;
-  const POOP_FADE_SECONDS = 30;
-
   /** Sleep / nap. */
   const SLEEP_ENTER_RATIO = 0.9;
   const SLEEP_WAKE_RATIO = 0.7;
@@ -431,8 +426,6 @@
       size: def.size,
 
       attackCooldown: 0,
-      /** Seconds until next visual poop while roaming (predators). */
-      poopTimer: isPred ? 5 + Math.random() * 5 : 0,
 
       // Corpse fields (set on death)
       corpseCalories: 0,
@@ -1550,14 +1543,6 @@
       moveToward(animal, animal.spawnX, animal.spawnY, dt, 0.5, ctx);
     } else {
       wander(animal, dt, ctx.rng, ctx);
-    }
-
-    // Visual poop every 5–10 seconds while roaming
-    animal.poopTimer -= dt;
-    if (animal.poopTimer <= 0) {
-      if (ctx.spawnPoop) ctx.spawnPoop(animal.x, animal.y);
-      animal.poopTimer =
-        POOP_INTERVAL_MIN + ctx.rng.float() * (POOP_INTERVAL_MAX - POOP_INTERVAL_MIN);
     }
   }
 
