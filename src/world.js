@@ -125,10 +125,12 @@
         const elev = fbm(wx * 0.02, wy * 0.02, seedNum, 4);
         const moist = fbm(wx * 0.03 + 40, wy * 0.03 + 40, seedNum + 77, 3);
         const river = fbm(wx * 0.015 + 100, wy * 0.015 + 100, seedNum + 199, 2);
+        // Large rock sections: ~50% fewer than elev peaks, ~2× longer (X-stretched noise).
+        const rock = fbm(wx * 0.004, wy * 0.02, seedNum + 911, 4);
 
         let tile = TILE.GRASS;
 
-        if (elev > 0.72) {
+        if (rock > 0.72) {
           tile = TILE.CLIFF;
         } else if (river > 0.48 && river < 0.54 && elev < 0.55) {
           tile = TILE.WATER;

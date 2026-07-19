@@ -58,6 +58,67 @@ function assert(cond, msg) {
   assert(MAP_PIXEL_SIZE === 12800, 'map is 12800×12800 pixels');
 }
 
+// --- Unit: large rock sections (~50% fewer, ~2× longer) ---
+{
+  const TILE = Wildborn.world.TILE;
+  const world = createWorld('rock-dim-test');
+  const N = MAP_TILES;
+  const grid = Array.from({ length: N }, () => Array(N).fill(0));
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      if (world.getTile(x, y) === TILE.CLIFF) grid[y][x] = 1;
+    }
+  }
+  const seen = Array.from({ length: N }, () => Array(N).fill(false));
+  let large = 0;
+  let lenSum = 0;
+  let widthSum = 0;
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      if (!grid[y][x] || seen[y][x]) continue;
+      const q = [[x, y]];
+      let minx = x;
+      let maxx = x;
+      let miny = y;
+      let maxy = y;
+      let size = 0;
+      seen[y][x] = true;
+      while (q.length) {
+        const [cx, cy] = q.pop();
+        size++;
+        minx = Math.min(minx, cx);
+        maxx = Math.max(maxx, cx);
+        miny = Math.min(miny, cy);
+        maxy = Math.max(maxy, cy);
+        for (const [dx, dy] of [
+          [1, 0],
+          [-1, 0],
+          [0, 1],
+          [0, -1],
+        ]) {
+          const nx = cx + dx;
+          const ny = cy + dy;
+          if (nx < 0 || ny < 0 || nx >= N || ny >= N || seen[ny][nx] || !grid[ny][nx]) continue;
+          seen[ny][nx] = true;
+          q.push([nx, ny]);
+        }
+      }
+      if (size >= 40) {
+        large++;
+        const w = maxx - minx + 1;
+        const h = maxy - miny + 1;
+        lenSum += Math.max(w, h);
+        widthSum += Math.min(w, h);
+      }
+    }
+  }
+  const avgLen = lenSum / large;
+  const avgWidth = widthSum / large;
+  assert(large >= 8 && large <= 18, 'large rock sections are fewer (~half prior density)');
+  assert(avgLen >= 35, 'large rock sections are longer (~2× prior length)');
+  assert(avgLen / avgWidth >= 2, 'large rock sections are elongated');
+}
+
 // --- Unit: spatial grid ---
 {
   const grid = createSpatialGrid(64);
