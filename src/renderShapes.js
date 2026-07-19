@@ -206,12 +206,6 @@
     // Flee lean forward
     if ((state === 'FLEE' || opts.fleeing) && state !== 'SLEEP') {
       rot = opts.counterAttack ? -0.15 : 0.18;
-      ox += opts.counterAttack ? 1.5 * Math.sin(t * 14) : 0;
-    }
-
-    // Attack lunge
-    if (opts.attacking) {
-      ox += Math.sin(t * 16) * 3;
     }
 
     // Bear rear-up

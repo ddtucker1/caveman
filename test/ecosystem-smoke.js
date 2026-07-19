@@ -99,9 +99,9 @@ function assert(cond, msg) {
   const taken = consumePlant(p, 100);
   assert(taken === 10 && !p.alive, 'consumePlant depletes and kills plant (stays in memory)');
   assert(p.growthPaused === true, 'eating pauses plant growth');
-  assert(p.respawnTimer === RESPAWN_DELAY_TICKS, 'respawn timer starts at 3840s (7680 ticks)');
-  assert(RESPAWN_DELAY_TICKS === 7680, 'RESPAWN_DELAY_TICKS is 7680');
-  assert(Wildborn.plant.RESPAWN_DELAY_SECONDS === 3840, 'RESPAWN_DELAY_SECONDS is 3840');
+  assert(p.respawnTimer === RESPAWN_DELAY_TICKS, 'respawn timer starts at 3072s (6144 ticks)');
+  assert(RESPAWN_DELAY_TICKS === 6144, 'RESPAWN_DELAY_TICKS is 6144');
+  assert(Wildborn.plant.RESPAWN_DELAY_SECONDS === 3072, 'RESPAWN_DELAY_SECONDS is 3072');
   // Fast-forward respawn
   p.respawnTimer = 1;
   updatePlant(p, () => ({ x: 50, y: 50 }));
@@ -869,7 +869,6 @@ function assert(cond, msg) {
       findNearestAnimal: () => null,
       queryAnimals: () => [],
       spawnSplash: () => {},
-      spawnPoop: () => {},
     };
   }
 
@@ -1073,7 +1072,6 @@ function assert(cond, msg) {
     findNearestPlant: () => null,
     findNearestAnimal: () => null,
     queryAnimals: () => [],
-    spawnPoop: () => {},
     spawnSplash: () => {},
   };
   // Well-fed: stay roaming
