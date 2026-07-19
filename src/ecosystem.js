@@ -328,6 +328,9 @@
         nextX = animal.x + animal.vx * dt;
         nextY = animal.y + animal.vy * dt;
       } else {
+        // Stationary far-LOD animals still need an escape chance when pinned
+        // against water / tree edges between full AI frames.
+        maybeCheapUnstick(animal, dt);
         return;
       }
 
@@ -343,9 +346,14 @@
         animal.vy = 0;
       }
 
+      const allowWater =
+        animal.aquatic ||
+        animal.waterSpeedKey ||
+        (animal._waterStuckTimer || 0) >=
+          ((Wildborn.animal && Wildborn.animal.WATER_STUCK_CROSS_SECONDS) || 1.25);
+
       if (
-        !animal.aquatic &&
-        !animal.waterSpeedKey &&
+        !allowWater &&
         world.isSlow(world.getTileAtPixel(animal.x, animal.y))
       ) {
         animal.x = prevX;
@@ -355,6 +363,63 @@
         animal._path = null;
         animal._pathIndex = 0;
         animal._waterStuckTimer = (animal._waterStuckTimer || 0) + dt;
+        animal._obstacleStuckTimer = (animal._obstacleStuckTimer || 0) + dt;
+        maybeCheapUnstick(animal, dt);
+        return;
+      }
+
+      if (animal.x === prevX && animal.y === prevY) {
+        animal._obstacleStuckTimer = (animal._obstacleStuckTimer || 0) + dt;
+        maybeCheapUnstick(animal, dt);
+      } else {
+        animal._obstacleStuckTimer = Math.max(
+          0,
+          (animal._obstacleStuckTimer || 0) - dt * 2
+        );
+        animal._waterStuckTimer = Math.max(0, (animal._waterStuckTimer || 0) - dt);
+      }
+    }
+
+    /**
+     * Far-LOD escape: step onto a nearby land pixel when pinned at water/tree edges.
+     * Avoids animals freezing until the next full AI update.
+     */
+    function maybeCheapUnstick(animal, dt) {
+      const waterStuck = animal._waterStuckTimer || 0;
+      const obstacleStuck = animal._obstacleStuckTimer || 0;
+      const waterThresh =
+        (Wildborn.animal && Wildborn.animal.WATER_STUCK_CROSS_SECONDS) || 1.25;
+      const obstThresh =
+        (Wildborn.animal && Wildborn.animal.OBSTACLE_STUCK_ESCAPE_SECONDS) || 0.85;
+      if (waterStuck < waterThresh * 0.5 && obstacleStuck < obstThresh * 0.5) {
+        return;
+      }
+      const allowWater =
+        animal.aquatic || animal.waterSpeedKey || waterStuck >= waterThresh;
+      const speed = Math.max(8, animal.baseSpeed || 20);
+      const step = Math.max(TILE_SIZE * 0.45, speed * Math.max(dt, 0.1));
+      const dirs = [
+        [step, 0],
+        [-step, 0],
+        [0, step],
+        [0, -step],
+        [step * 0.7, step * 0.7],
+        [-step * 0.7, step * 0.7],
+        [step * 0.7, -step * 0.7],
+        [-step * 0.7, -step * 0.7],
+      ];
+      for (let i = 0; i < dirs.length; i++) {
+        const nx = animal.x + dirs[i][0];
+        const ny = animal.y + dirs[i][1];
+        if (world.isSolid(world.getTileAtPixel(nx, ny))) continue;
+        if (!allowWater && world.isSlow(world.getTileAtPixel(nx, ny))) continue;
+        animal.x = nx;
+        animal.y = ny;
+        animal.vx = (dirs[i][0] / step) * speed * 0.5;
+        animal.vy = (dirs[i][1] / step) * speed * 0.5;
+        animal._path = null;
+        animal._pathIndex = 0;
+        return;
       }
     }
 
