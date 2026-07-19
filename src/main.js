@@ -78,14 +78,10 @@
     cactus: '🌵',
     rabbit: '🐇',
     deer: '🦌',
-    cow: '🐄',
-    raccoon: '🦝',
     bison: '🦬',
     ostrich: '🦤',
     turtle: '🐢',
     wolf: '🐺',
-    lion: '🦁',
-    panther: '🐆',
     bear: '🐻',
     alligator: '🐊',
   };
@@ -267,7 +263,7 @@
   function inspectorTypeClass(entity) {
     if (!entity) return 'plant';
     if (entity.kind === 'plant') return 'plant';
-    if (entity.diet === 'predator' || entity.diet === 'omnivore') return 'predator';
+    if (entity.diet === 'predator') return 'predator';
     return 'herbivore';
   }
 
@@ -326,11 +322,14 @@
     let html = '';
 
     if (entity.kind === 'plant') {
-      const growthPerSec = (entity.growthPerTick || 0) / tickSec;
       const eaters = countAnimalsEatingPlant(entity, game.ecosystem);
+      const respawnSec =
+        !entity.alive && entity.respawnTimer > 0
+          ? Math.ceil(entity.respawnTimer * tickSec)
+          : 0;
       html += inspRow('Calories', Math.round(entity.calories) + ' / ' + Math.round(entity.maxCalories));
-      html += inspRow('Growth rate', growthPerSec.toFixed(1) + ' cal/s');
       html += inspRow('Status', formatInspectState(entity));
+      if (respawnSec > 0) html += inspRow('Respawn in', respawnSec + 's');
       html += inspRow('Animals eating', String(eaters));
       return { name: name, html: html };
     }
@@ -352,8 +351,8 @@
     html += inspRow('Reproduction', repro);
     html += inspRow('Speed', curSpeed.toFixed(1) + ' / ' + maxSpeed.toFixed(1));
 
-    if (entity.diet === 'predator' || entity.diet === 'omnivore') {
-      html += inspRow('Hunt threshold', '30%');
+    if (entity.diet === 'predator') {
+      html += inspRow('Hunt threshold', '50%');
       let targetName = '—';
       if (
         (entity._hunting || entity.state === 'SEEK_PREY' || entity.state === 'SEEK_FOOD') &&

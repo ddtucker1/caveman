@@ -423,11 +423,8 @@
     const plants = ecosystem.plants;
     for (let i = 0; i < plants.length; i++) {
       const p = plants[i];
+      if (!p.alive) continue;
       if (p.x < x0 || p.x > x1 || p.y < y0 || p.y > y1) continue;
-      if (!p.alive) {
-        drawPlantSprout(ctx, p, camera);
-        continue;
-      }
       drawPlantSprite(ctx, p, camera, time);
     }
 
@@ -439,7 +436,7 @@
         if (!a.alive || a.state === 'DEAD') continue;
         if (a.x < x0 || a.x > x1 || a.y < y0 || a.y > y1) continue;
         const hunting =
-          (a.diet === 'predator' || a.diet === 'omnivore') &&
+          a.diet === 'predator' &&
           (a.state === 'SEEK_FOOD' || a.state === 'SEEK_PREY') &&
           a.target &&
           a.target.kind === 'animal' &&
@@ -512,35 +509,6 @@
     );
   }
 
-  /** Tiny sprout icon while a depleted plant waits 2765s to respawn elsewhere. */
-  function drawPlantSprout(ctx, plant, camera) {
-    const s = worldToScreen(camera, plant.x, plant.y);
-    const progress = Math.max(0, Math.min(1, plant.sproutProgress || 0));
-    const h = 2 + progress * 8;
-    const w = 1 + progress * 3;
-
-    ctx.save();
-    ctx.translate(s.x, s.y);
-    // Stem
-    ctx.strokeStyle = 'rgba(70, 140, 50, ' + (0.45 + progress * 0.45) + ')';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(0, 2);
-    ctx.lineTo(0, 2 - h);
-    ctx.stroke();
-    // Leaves grow with progress
-    if (progress > 0.15) {
-      ctx.fillStyle = 'rgba(90, 170, 60, ' + (0.5 + progress * 0.5) + ')';
-      ctx.beginPath();
-      ctx.ellipse(-w * 0.6, 2 - h * 0.7, w, w * 0.55, -0.5, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.ellipse(w * 0.6, 2 - h * 0.55, w * 0.85, w * 0.5, 0.5, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.restore();
-  }
-
   function drawAnimalSprite(ctx, animal, camera, time, ecosystem) {
     const s = worldToScreen(camera, animal.x, animal.y);
     const shapeDef = Wildborn.shapes.getSpeciesDef(animal.species);
@@ -568,7 +536,7 @@
     const moving = speed > 4;
     const hunting =
       animal.alive &&
-      (animal.diet === 'predator' || animal.diet === 'omnivore') &&
+      animal.diet === 'predator' &&
       (animal.state === 'SEEK_FOOD' || animal.state === 'SEEK_PREY') &&
       animal.target &&
       animal.target.kind === 'animal' &&
@@ -788,7 +756,7 @@
     const plants = ecosystem.plants;
     for (let i = 0; i < plants.length; i++) {
       const p = plants[i];
-      // Allow picking depleted plants (sprouts) for the inspector
+      // Allow picking depleted plants for the inspector (respawn timer)
       const dx = p.x - worldX;
       const dy = p.y - worldY;
       const d2 = dx * dx + dy * dy;
@@ -866,7 +834,7 @@
     const plantsMax = stats.plantsMax || Wildborn.ecosystem.INITIAL_PLANT_COUNT || 150;
     lines.push(
       'Plants: ' + stats.plantsAlive + ' / ' + plantsMax +
-      (stats.plantsSprouting ? '  sprouts ' + stats.plantsSprouting : '') +
+      (stats.plantsSprouting ? '  waiting ' + stats.plantsSprouting : '') +
       '  avgCal ' + stats.plantAvgCalories +
       '  corpses ' + stats.corpses
     );
@@ -988,7 +956,7 @@
         if (!a.alive || a.state === 'DEAD') continue;
         const ax = (a.x / mapPx) * size;
         const ay = (a.y / mapPx) * size;
-        const pred = a.diet === 'predator' || a.diet === 'omnivore';
+        const pred = a.diet === 'predator';
         mctx.fillStyle = pred ? 'rgba(220, 70, 60, 0.9)' : 'rgba(240, 230, 180, 0.85)';
         mctx.fillRect(ax - 1, ay - 1, 2, 2);
       }

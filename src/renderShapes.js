@@ -177,6 +177,20 @@
       sy = 2 - breath;
     }
 
+    // Gentle plant idle sway / bob / leaf rustle
+    if (opts._isPlant || state === 'IDLE') {
+      const cat = Wildborn.shapes.getCategory(entityType);
+      if (cat === 'plant') {
+        const sway = Math.sin(t * 1.1) * 0.045;
+        const bob = Math.sin(t * 1.7 + 0.4) * 0.55;
+        const rustle = Math.sin(t * 2.4 + idPhase) * 0.012;
+        rot = sway + rustle;
+        oy = bob;
+        sx = 1 + Math.sin(t * 1.3) * 0.015;
+        sy = 1 - Math.sin(t * 1.3) * 0.01;
+      }
+    }
+
     // Move bob
     if (moving && state !== 'EATING' && state !== 'SLEEP') {
       oy = Math.sin(t * 8 + speed) * Math.min(1.6, 0.8 + speed * 0.01);
@@ -310,127 +324,209 @@
   // ---------------------------------------------------------------------------
 
   function drawPlant(ctx, type, def, sz, calRatio, calories, maxCalories, time) {
-    if (type === 'berry_bush') drawBerryBush(ctx, def, sz, calories);
-    else if (type === 'grass') drawGrassPlant(ctx, def, sz, calRatio);
-    else if (type === 'mushroom') drawMushroom(ctx, def, sz, calRatio);
-    else if (type === 'fruit_tree') drawFruitTree(ctx, def, sz, calories);
-    else if (type === 'cactus') drawCactus(ctx, def, sz, calRatio, calories, maxCalories);
+    if (type === 'berry_bush') drawBerryBush(ctx, def, sz, calories, time);
+    else if (type === 'grass') drawGrassPlant(ctx, def, sz, calRatio, time);
+    else if (type === 'mushroom') drawMushroom(ctx, def, sz, calRatio, time);
+    else if (type === 'fruit_tree') drawFruitTree(ctx, def, sz, calories, time);
+    else if (type === 'cactus') drawCactus(ctx, def, sz, calRatio, calories, maxCalories, time);
   }
 
-  function drawBerryBush(ctx, def, sz, calories) {
-    const n = def.clusterCount || 4;
+  function drawBerryBush(ctx, def, sz, calories, time) {
+    const n = def.clusterCount || 5;
+    const leafDark = def.leafDark || '#1e5a1e';
+    const leafColor = def.leafColor || def.baseColor;
+    // Under-foliage
+    ctx.fillStyle = leafDark;
+    ctx.beginPath();
+    ctx.ellipse(0, sz * 0.12, sz * 0.42, sz * 0.18, 0, 0, Math.PI * 2);
+    ctx.fill();
     ctx.fillStyle = def.baseColor;
     for (let i = 0; i < n; i++) {
-      const a = (i / n) * Math.PI * 2;
+      const a = (i / n) * Math.PI * 2 + 0.2;
       const r = sz * 0.28;
+      const wobble = time != null ? Math.sin(time * 1.5 + i) * 0.4 : 0;
       ctx.beginPath();
-      ctx.arc(Math.cos(a) * r * 0.7, Math.sin(a) * r * 0.5 - 1, r, 0, Math.PI * 2);
+      ctx.arc(Math.cos(a) * r * 0.75, Math.sin(a) * r * 0.5 - 2 + wobble * 0.15, r, 0, Math.PI * 2);
       ctx.fill();
     }
-    // Center blob
+    // Center canopy highlight
+    ctx.fillStyle = leafColor;
     ctx.beginPath();
-    ctx.arc(0, -1, sz * 0.32, 0, Math.PI * 2);
+    ctx.arc(0, -2, sz * 0.34, 0, Math.PI * 2);
     ctx.fill();
 
-    if (calories > (def.berryCalorieThreshold || 30)) {
-      ctx.fillStyle = def.berryColor || def.accentColor;
+    if (calories > (def.berryCalorieThreshold || 1)) {
+      const berry = def.berryColor || def.accentColor;
+      const hi = def.berryHighlight || '#e07090';
       const berries = [
-        [-2, -3], [3, -1], [-1, 2], [2, -4], [0, 0],
+        [-4, -5], [5, -2], [-2, 3], [3, -7], [0, -1], [-5, 1], [4, 2],
       ];
       for (let i = 0; i < berries.length; i++) {
+        const bx = berries[i][0] * (sz / 20);
+        const by = berries[i][1] * (sz / 20);
+        ctx.fillStyle = berry;
         ctx.beginPath();
-        ctx.arc(berries[i][0], berries[i][1], 1.3, 0, Math.PI * 2);
+        ctx.arc(bx, by, Math.max(1.4, sz * 0.07), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = hi;
+        ctx.beginPath();
+        ctx.arc(bx - 0.6, by - 0.6, Math.max(0.5, sz * 0.025), 0, Math.PI * 2);
         ctx.fill();
       }
     }
   }
 
-  function drawGrassPlant(ctx, def, sz, calRatio) {
-    const h = sz * (0.5 + calRatio * 1.1);
+  function drawGrassPlant(ctx, def, sz, calRatio, time) {
+    const h = sz * (0.55 + calRatio * 1.05);
     const color = calRatio < 0.25 ? def.depletedColor : def.baseColor;
     const dark = calRatio < 0.25 ? '#6a5030' : def.darkColor;
-    for (let i = 0; i < 3; i++) {
-      const bx = -sz * 0.35 + i * sz * 0.35;
-      const tipX = bx + (i - 1) * 1.2;
-      const grad = ctx.createLinearGradient(bx, h * 0.3, tipX, -h * 0.5);
+    const tip = def.tipColor || color;
+    const blades = 5;
+    for (let i = 0; i < blades; i++) {
+      const bx = -sz * 0.4 + i * (sz * 0.2);
+      const lean = (i - (blades - 1) / 2) * 1.4;
+      const sway = time != null ? Math.sin((time || 0) * 2.2 + i * 0.7) * 1.2 : 0;
+      const tipX = bx + lean + sway;
+      const grad = ctx.createLinearGradient(bx, h * 0.3, tipX, -h * 0.55);
       grad.addColorStop(0, dark);
-      grad.addColorStop(1, color);
+      grad.addColorStop(0.65, color);
+      grad.addColorStop(1, tip);
       ctx.strokeStyle = grad;
-      ctx.lineWidth = 1.6;
+      ctx.lineWidth = 1.4 + (i % 2) * 0.4;
+      ctx.lineCap = 'round';
       ctx.beginPath();
-      ctx.moveTo(bx, sz * 0.35);
-      ctx.quadraticCurveTo(bx + (i - 1) * 2, -h * 0.1, tipX, -h * 0.45);
+      ctx.moveTo(bx, sz * 0.38);
+      ctx.quadraticCurveTo(bx + lean * 0.5, -h * 0.05, tipX, -h * 0.5);
       ctx.stroke();
     }
   }
 
-  function drawMushroom(ctx, def, sz, calRatio) {
-    // Stem
+  function drawMushroom(ctx, def, sz, calRatio, time) {
+    const bob = time != null ? Math.sin(time * 1.8) * 0.4 : 0;
+    // Stem with highlight
     ctx.fillStyle = def.stemColor;
-    ctx.fillRect(-1.2, -1, 2.4, sz * 0.45);
+    ctx.fillRect(-sz * 0.09, -1 + bob, sz * 0.18, sz * 0.48);
+    ctx.fillStyle = def.stemHighlight || '#a88868';
+    ctx.fillRect(-sz * 0.04, -1 + bob, sz * 0.06, sz * 0.48);
     // Cap
     ctx.fillStyle = calRatio > 0.5 ? def.capColor : def.capColorAlt;
     ctx.beginPath();
-    ctx.ellipse(0, -sz * 0.15, sz * 0.42, sz * 0.28, 0, Math.PI, 0);
+    ctx.ellipse(0, -sz * 0.18 + bob, sz * 0.46, sz * 0.3, 0, Math.PI, 0);
+    ctx.fill();
+    // Cap underside rim
+    ctx.fillStyle = 'rgba(0,0,0,0.12)';
+    ctx.beginPath();
+    ctx.ellipse(0, -sz * 0.16 + bob, sz * 0.44, sz * 0.08, 0, 0, Math.PI * 2);
     ctx.fill();
     if (calRatio > 0.55) {
       ctx.fillStyle = def.spotColor;
-      ctx.beginPath();
-      ctx.arc(-2, -sz * 0.22, 1.1, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(2, -sz * 0.18, 0.9, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-
-  function drawFruitTree(ctx, def, sz, calories) {
-    // Trunk
-    ctx.fillStyle = def.trunkColor;
-    ctx.fillRect(-2, -sz * 0.05, 4, sz * 0.5);
-    // Canopy clouds
-    ctx.fillStyle = def.canopyColor;
-    ctx.beginPath();
-    ctx.arc(-sz * 0.22, -sz * 0.25, sz * 0.28, 0, Math.PI * 2);
-    ctx.arc(sz * 0.22, -sz * 0.22, sz * 0.26, 0, Math.PI * 2);
-    ctx.arc(0, -sz * 0.4, sz * 0.3, 0, Math.PI * 2);
-    ctx.fill();
-    if (calories > (def.fruitCalorieThreshold || 50)) {
-      ctx.fillStyle = def.fruitColor;
-      const fruits = [[-3, -4], [4, -6], [0, -10], [3, -2]];
-      for (let i = 0; i < fruits.length; i++) {
+      const spots = [
+        [-sz * 0.18, -sz * 0.28],
+        [sz * 0.16, -sz * 0.22],
+        [0, -sz * 0.34],
+        [sz * 0.08, -sz * 0.14],
+      ];
+      for (let i = 0; i < spots.length; i++) {
         ctx.beginPath();
-        ctx.arc(fruits[i][0], fruits[i][1], 1.4, 0, Math.PI * 2);
+        ctx.arc(spots[i][0], spots[i][1] + bob, 1.1 + (i % 2) * 0.3, 0, Math.PI * 2);
         ctx.fill();
       }
     }
   }
 
-  function drawCactus(ctx, def, sz, calRatio, calories, maxCalories) {
+  function drawFruitTree(ctx, def, sz, calories, time) {
+    // Trunk with bark highlight
+    ctx.fillStyle = def.trunkColor;
+    ctx.fillRect(-sz * 0.08, -sz * 0.05, sz * 0.16, sz * 0.52);
+    ctx.fillStyle = def.trunkHighlight || '#8a6038';
+    ctx.fillRect(-sz * 0.02, -sz * 0.05, sz * 0.05, sz * 0.52);
+    // Canopy layers
+    ctx.fillStyle = def.canopyColor;
+    ctx.beginPath();
+    ctx.arc(-sz * 0.24, -sz * 0.28, sz * 0.3, 0, Math.PI * 2);
+    ctx.arc(sz * 0.24, -sz * 0.24, sz * 0.28, 0, Math.PI * 2);
+    ctx.arc(0, -sz * 0.44, sz * 0.32, 0, Math.PI * 2);
+    ctx.arc(-sz * 0.1, -sz * 0.18, sz * 0.22, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = def.canopyLight || '#3a8a2e';
+    ctx.beginPath();
+    ctx.arc(sz * 0.08, -sz * 0.4, sz * 0.18, 0, Math.PI * 2);
+    ctx.arc(-sz * 0.16, -sz * 0.32, sz * 0.14, 0, Math.PI * 2);
+    ctx.fill();
+    if (calories > (def.fruitCalorieThreshold || 1)) {
+      const fruit = def.fruitColor;
+      const hi = def.fruitHighlight || '#f0a050';
+      const fruits = [
+        [-sz * 0.18, -sz * 0.2],
+        [sz * 0.2, -sz * 0.28],
+        [0, -sz * 0.42],
+        [sz * 0.12, -sz * 0.12],
+        [-sz * 0.08, -sz * 0.3],
+        [sz * 0.28, -sz * 0.16],
+      ];
+      for (let i = 0; i < fruits.length; i++) {
+        const sway = time != null ? Math.sin(time * 1.4 + i) * 0.4 : 0;
+        ctx.fillStyle = fruit;
+        ctx.beginPath();
+        ctx.arc(fruits[i][0] + sway * 0.2, fruits[i][1], Math.max(1.6, sz * 0.055), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = hi;
+        ctx.beginPath();
+        ctx.arc(fruits[i][0] - 0.7, fruits[i][1] - 0.7, Math.max(0.5, sz * 0.02), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  function drawCactus(ctx, def, sz, calRatio, calories, maxCalories, time) {
+    const bob = time != null ? Math.sin(time * 1.2) * 0.3 : 0;
     ctx.fillStyle = def.baseColor;
     // Body
     ctx.beginPath();
-    ctx.ellipse(0, 0, sz * 0.28, sz * 0.48, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, bob, sz * 0.28, sz * 0.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = def.baseLight || '#3a8a4a';
+    ctx.beginPath();
+    ctx.ellipse(sz * 0.06, bob, sz * 0.1, sz * 0.42, 0, 0, Math.PI * 2);
     ctx.fill();
     // Arms
+    ctx.fillStyle = def.baseColor;
     ctx.beginPath();
-    ctx.ellipse(-sz * 0.32, -sz * 0.05, sz * 0.14, sz * 0.2, -0.4, 0, Math.PI * 2);
+    ctx.ellipse(-sz * 0.34, -sz * 0.05 + bob, sz * 0.15, sz * 0.22, -0.4, 0, Math.PI * 2);
     ctx.fill();
     ctx.beginPath();
-    ctx.ellipse(sz * 0.3, -sz * 0.12, sz * 0.12, sz * 0.18, 0.35, 0, Math.PI * 2);
+    ctx.ellipse(sz * 0.32, -sz * 0.14 + bob, sz * 0.13, sz * 0.2, 0.35, 0, Math.PI * 2);
     ctx.fill();
     // Ridges
     ctx.strokeStyle = def.ridgeColor;
-    ctx.lineWidth = 1;
+    ctx.lineWidth = 1.2;
     ctx.beginPath();
-    ctx.moveTo(0, -sz * 0.35);
-    ctx.lineTo(0, sz * 0.35);
+    ctx.moveTo(0, -sz * 0.38 + bob);
+    ctx.lineTo(0, sz * 0.38 + bob);
     ctx.stroke();
-    // Flower at max calories
+    // Spines
+    ctx.strokeStyle = def.spineColor || '#d8d0b8';
+    ctx.lineWidth = 0.8;
+    for (let i = 0; i < 4; i++) {
+      const y = -sz * 0.25 + i * sz * 0.16 + bob;
+      ctx.beginPath();
+      ctx.moveTo(sz * 0.2, y);
+      ctx.lineTo(sz * 0.32, y - 1);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(-sz * 0.2, y + 2);
+      ctx.lineTo(-sz * 0.32, y + 1);
+      ctx.stroke();
+    }
+    // Flower at full calories
     if (calories >= maxCalories) {
       ctx.fillStyle = def.flowerColor;
       ctx.beginPath();
-      ctx.arc(0, -sz * 0.5, 2, 0, Math.PI * 2);
+      ctx.arc(0, -sz * 0.52 + bob, Math.max(2.2, sz * 0.08), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#f0d060';
+      ctx.beginPath();
+      ctx.arc(0, -sz * 0.52 + bob, Math.max(0.8, sz * 0.03), 0, Math.PI * 2);
       ctx.fill();
     }
   }
@@ -446,8 +542,6 @@
 
     if (type === 'rabbit') drawRabbit(ctx, def, sz, opts, lookX, lookY, headY);
     else if (type === 'deer') drawDeer(ctx, def, sz, opts, lookX, lookY, headY);
-    else if (type === 'cow') drawCow(ctx, def, sz, opts, lookX, lookY, headY);
-    else if (type === 'raccoon') drawRaccoon(ctx, def, sz, opts, lookX, lookY, headY);
     else if (type === 'bison') drawBison(ctx, def, sz, opts, lookX, lookY, headY);
     else if (type === 'ostrich') drawOstrich(ctx, def, sz, opts, lookX, lookY, headY);
     else if (type === 'turtle') drawTurtle(ctx, def, sz, opts, lookX, lookY, headY);
@@ -537,78 +631,7 @@
     drawEye(ctx, sz * 0.48, headY - sz * 0.22, def.eyeColor, lookX, lookY);
   }
 
-  function drawCow(ctx, def, sz, opts, lookX, lookY, headY) {
-    drawLegs(ctx, 'short_stubby', sz, '#4a4030');
-    // Udder
-    ctx.fillStyle = def.udderColor;
-    ctx.beginPath();
-    ctx.ellipse(0, headY + sz * 0.28, sz * 0.16, sz * 0.1, 0, 0, Math.PI * 2);
-    ctx.fill();
-    // Body
-    ctx.fillStyle = def.bodyColor;
-    roundRect(ctx, -sz * 0.48, headY - sz * 0.28, sz * 0.96, sz * 0.55, 4);
-    ctx.fill();
-    // Patches
-    ctx.fillStyle = def.patchColor;
-    ctx.beginPath();
-    ctx.ellipse(-sz * 0.15, headY - sz * 0.05, sz * 0.16, sz * 0.14, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.ellipse(sz * 0.2, headY + sz * 0.05, sz * 0.12, sz * 0.1, 0, 0, Math.PI * 2);
-    ctx.fill();
-    // Head
-    ctx.fillStyle = def.bodyColor;
-    ctx.beginPath();
-    ctx.ellipse(sz * 0.42, headY - sz * 0.1, sz * 0.2, sz * 0.18, 0, 0, Math.PI * 2);
-    ctx.fill();
-    // Ears
-    ctx.fillStyle = def.earColor;
-    ctx.beginPath();
-    ctx.ellipse(sz * 0.32, headY - sz * 0.28, sz * 0.08, sz * 0.06, 0, 0, Math.PI * 2);
-    ctx.fill();
-    // Thin tail
-    ctx.strokeStyle = '#4a4030';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(-sz * 0.48, headY);
-    ctx.quadraticCurveTo(-sz * 0.6, headY + sz * 0.2, -sz * 0.52, headY + sz * 0.3);
-    ctx.stroke();
-    drawEye(ctx, sz * 0.5, headY - sz * 0.14, def.eyeColor, lookX, lookY);
-  }
 
-  function drawRaccoon(ctx, def, sz, opts, lookX, lookY, headY) {
-    drawLegs(ctx, 'medium', sz, def.bodyColor);
-    // Striped tail
-    const tx = -sz * 0.45;
-    const ty = headY + sz * 0.05;
-    for (let i = 0; i < 4; i++) {
-      ctx.fillStyle = i % 2 === 0 ? def.stripeColor : def.tailTip;
-      ctx.beginPath();
-      ctx.ellipse(tx - i * 2.2, ty + i * 0.5, sz * 0.12, sz * 0.09, 0.3, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    // Body
-    ctx.fillStyle = def.bodyColor;
-    ctx.beginPath();
-    ctx.ellipse(0, headY, sz * 0.4, sz * 0.28, 0, 0, Math.PI * 2);
-    ctx.fill();
-    // Head
-    ctx.beginPath();
-    ctx.ellipse(sz * 0.3, headY - sz * 0.05, sz * 0.22, sz * 0.18, 0, 0, Math.PI * 2);
-    ctx.fill();
-    // Mask
-    ctx.fillStyle = def.maskColor;
-    ctx.fillRect(sz * 0.18, headY - sz * 0.14, sz * 0.28, sz * 0.12);
-    // Ears
-    ctx.fillStyle = def.earColor;
-    ctx.beginPath();
-    ctx.arc(sz * 0.22, headY - sz * 0.22, sz * 0.08, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(sz * 0.36, headY - sz * 0.22, sz * 0.08, 0, Math.PI * 2);
-    ctx.fill();
-    drawEye(ctx, sz * 0.38, headY - sz * 0.1, def.eyeColor, lookX, lookY);
-  }
 
   function drawBison(ctx, def, sz, opts, lookX, lookY, headY) {
     drawLegs(ctx, 'short_thick', sz, def.bodyColor);
@@ -742,8 +765,6 @@
     const headY = opts.eating || opts.state === 'EATING' ? 1.8 : 0;
 
     if (type === 'wolf') drawWolf(ctx, def, sz, opts, lookX, lookY, headY);
-    else if (type === 'lion') drawLion(ctx, def, sz, opts, lookX, lookY, headY);
-    else if (type === 'panther') drawPanther(ctx, def, sz, opts, lookX, lookY, headY);
     else if (type === 'bear') drawBear(ctx, def, sz, opts, lookX, lookY, headY);
     else if (type === 'alligator') drawAlligator(ctx, def, sz, opts, lookX, lookY, headY);
   }
@@ -791,88 +812,7 @@
     drawEye(ctx, sz * 0.4, headY - sz * 0.14, def.eyeColor, lookX, lookY);
   }
 
-  function drawLion(ctx, def, sz, opts, lookX, lookY, headY) {
-    drawLegs(ctx, 'medium', sz, def.bodyColor);
-    // Tail with tuft
-    ctx.strokeStyle = def.bodyColor;
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(-sz * 0.45, headY);
-    ctx.quadraticCurveTo(-sz * 0.7, headY - sz * 0.2, -sz * 0.65, headY - sz * 0.35);
-    ctx.stroke();
-    ctx.fillStyle = def.tailTuft;
-    ctx.beginPath();
-    ctx.arc(-sz * 0.65, headY - sz * 0.35, 2.5, 0, Math.PI * 2);
-    ctx.fill();
-    // Body
-    ctx.fillStyle = def.bodyColor;
-    ctx.beginPath();
-    ctx.ellipse(0, headY, sz * 0.48, sz * 0.3, 0, 0, Math.PI * 2);
-    ctx.fill();
-    // Mane (darker circle around head) — males denser
-    const maneR = opts.sex === 'female' ? sz * 0.28 : sz * 0.36;
-    ctx.fillStyle = def.maneColor;
-    ctx.beginPath();
-    ctx.arc(sz * 0.32, headY - sz * 0.08, maneR, 0, Math.PI * 2);
-    ctx.fill();
-    // Head
-    ctx.fillStyle = def.bodyColor;
-    ctx.beginPath();
-    ctx.arc(sz * 0.35, headY - sz * 0.08, sz * 0.2, 0, Math.PI * 2);
-    ctx.fill();
-    // Ears
-    ctx.fillStyle = def.earColor;
-    ctx.beginPath();
-    ctx.arc(sz * 0.25, headY - sz * 0.28, sz * 0.07, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(sz * 0.42, headY - sz * 0.28, sz * 0.07, 0, Math.PI * 2);
-    ctx.fill();
-    // Jaw chew
-    if (opts.eating || opts.state === 'EATING') {
-      ctx.fillStyle = '#3a2010';
-      ctx.fillRect(sz * 0.42, headY + (opts._jawOpen || 0), 4, 2);
-    }
-    drawEye(ctx, sz * 0.42, headY - sz * 0.12, def.eyeColor, lookX, lookY);
-  }
 
-  function drawPanther(ctx, def, sz, opts, lookX, lookY, headY) {
-    drawLegs(ctx, 'medium', sz, def.bodyColor);
-    // Long tapering tail
-    ctx.fillStyle = def.bodyColor;
-    ctx.beginPath();
-    ctx.moveTo(-sz * 0.4, headY);
-    ctx.lineTo(-sz * 0.85, headY - sz * 0.15);
-    ctx.lineTo(-sz * 0.4, headY + sz * 0.08);
-    ctx.fill();
-    // Sleek body
-    ctx.beginPath();
-    ctx.ellipse(0, headY, sz * 0.48, sz * 0.26, 0, 0, Math.PI * 2);
-    ctx.fill();
-    // Head
-    ctx.beginPath();
-    ctx.ellipse(sz * 0.38, headY - sz * 0.05, sz * 0.2, sz * 0.16, 0, 0, Math.PI * 2);
-    ctx.fill();
-    // Ears
-    ctx.fillStyle = def.earColor;
-    ctx.beginPath();
-    ctx.arc(sz * 0.28, headY - sz * 0.22, sz * 0.07, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(sz * 0.42, headY - sz * 0.22, sz * 0.07, 0, Math.PI * 2);
-    ctx.fill();
-    // Glowing yellow eyes — brighter when stalking
-    const glow = opts.stalking ? def.eyeGlowColor : def.eyeColor;
-    if (opts.stalking) {
-      ctx.save();
-      ctx.shadowColor = glow;
-      ctx.shadowBlur = 6;
-      drawEye(ctx, sz * 0.42, headY - sz * 0.1, glow, lookX, lookY);
-      ctx.restore();
-    } else {
-      drawEye(ctx, sz * 0.42, headY - sz * 0.1, glow, lookX, lookY);
-    }
-  }
 
   function drawBear(ctx, def, sz, opts, lookX, lookY, headY) {
     if (!opts.rearUp) drawLegs(ctx, 'short_thick', sz, def.bodyColor);

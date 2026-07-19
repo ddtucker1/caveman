@@ -4,11 +4,14 @@
       "label": "Berry Bush",
       "category": "plant",
       "baseColor": "#2d6a28",
+      "leafColor": "#3d8a38",
+      "leafDark": "#1e5a1e",
       "accentColor": "#a03050",
       "berryColor": "#c04060",
-      "size": 10,
-      "berryCalorieThreshold": 150,
-      "clusterCount": 4
+      "berryHighlight": "#e07090",
+      "size": 20,
+      "berryCalorieThreshold": 1,
+      "clusterCount": 5
     },
     "grass": {
       "label": "Grass",
@@ -16,33 +19,40 @@
       "baseColor": "#5aaa3a",
       "depletedColor": "#8a6a3a",
       "darkColor": "#3a7a28",
-      "size": 6
+      "tipColor": "#7cc84a",
+      "size": 12
     },
     "mushroom": {
       "label": "Mushroom",
       "category": "plant",
       "stemColor": "#8a6a4a",
+      "stemHighlight": "#a88868",
       "capColor": "#c05040",
       "capColorAlt": "#c4a070",
       "spotColor": "#f0ece0",
-      "size": 7
+      "size": 14
     },
     "fruit_tree": {
       "label": "Fruit Tree",
       "category": "plant",
       "trunkColor": "#6a4428",
+      "trunkHighlight": "#8a6038",
       "canopyColor": "#2a6a1e",
+      "canopyLight": "#3a8a2e",
       "fruitColor": "#e08030",
-      "size": 14,
-      "fruitCalorieThreshold": 250
+      "fruitHighlight": "#f0a050",
+      "size": 28,
+      "fruitCalorieThreshold": 1
     },
     "cactus": {
       "label": "Cactus",
       "category": "plant",
       "baseColor": "#2a6a3a",
+      "baseLight": "#3a8a4a",
       "ridgeColor": "#4a9a5a",
+      "spineColor": "#d8d0b8",
       "flowerColor": "#e080a0",
-      "size": 9
+      "size": 18
     }
   },
   "herbivores": {
@@ -73,37 +83,6 @@
       "tail": "short",
       "legs": "long_thin",
       "features": ["male_antlers"]
-    },
-    "cow": {
-      "label": "Cow",
-      "category": "herbivore",
-      "bodyColor": "#f0ece4",
-      "patchColor": "#2a2a28",
-      "udderColor": "#e090a0",
-      "earColor": "#d8d0c0",
-      "eyeColor": "#ffffff",
-      "size": 18,
-      "body": "rounded_rect",
-      "ears": "small_rounded",
-      "tail": "thin",
-      "legs": "short_stubby",
-      "features": ["patches", "udder"]
-    },
-    "raccoon": {
-      "label": "Raccoon",
-      "category": "herbivore",
-      "bodyColor": "#7a7a7a",
-      "maskColor": "#1a1a1a",
-      "stripeColor": "#2a2a2a",
-      "tailTip": "#e8e8e8",
-      "earColor": "#6a6a6a",
-      "eyeColor": "#ffffff",
-      "size": 10,
-      "body": "medium_oval",
-      "ears": "rounded",
-      "tail": "striped_rings",
-      "legs": "medium",
-      "features": ["eye_mask"]
     },
     "bison": {
       "label": "Bison",
@@ -164,33 +143,6 @@
       "ears": "pointed_up",
       "tail": "bushy",
       "features": ["snout", "hunt_teeth", "hunt_glow"]
-    },
-    "lion": {
-      "label": "Lion",
-      "category": "predator",
-      "bodyColor": "#d4a84a",
-      "maneColor": "#8a6020",
-      "earColor": "#c49840",
-      "tailTuft": "#4a3020",
-      "eyeColor": "#c03030",
-      "size": 17,
-      "body": "large_oval",
-      "ears": "rounded",
-      "tail": "long_tuft",
-      "features": ["mane", "roar_icon"]
-    },
-    "panther": {
-      "label": "Panther",
-      "category": "predator",
-      "bodyColor": "#1a1a22",
-      "earColor": "#2a2a32",
-      "eyeColor": "#e0c040",
-      "eyeGlowColor": "#ffe060",
-      "size": 14,
-      "body": "sleek_oval",
-      "ears": "rounded",
-      "tail": "long_taper",
-      "features": ["glow_eyes"]
     },
     "bear": {
       "label": "Bear",

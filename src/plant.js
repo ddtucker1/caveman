@@ -1,74 +1,61 @@
 /**
- * Ecosystem plants — grow calories over time, eaten by herbivores (and bears).
- * When depleted they become invisible, sprout for 2765s, then teleport to a
- * random land tile at 50% max calories (entity stays in memory).
- * Growth pauses the moment any animal starts eating until respawn.
+ * Ecosystem plants — fully grown on spawn/respawn, no growth ticks.
+ * When fully consumed they disappear and reappear after 2765s at a random
+ * valid land tile, again at full max calories.
  */
 (function (global) {
   const Wildborn = (global.Wildborn = global.Wildborn || {});
 
   /** @typedef {'berry_bush'|'grass'|'mushroom'|'fruit_tree'|'cactus'} PlantSpecies */
 
+  /** Visual sizes are 2× the previous defaults (matched in shapes.json / shapes.js). */
   const PLANT_SPECIES = {
-    berry_bush: {
-      id: 'berry_bush',
-      label: 'Berry Bush',
-      maxCalories: 250,
-      growthPerTick: 2.5,
-      color: '#3a8a2a',
-      accent: '#c44',
-      size: 10,
-      spawnWeight: 3,
-    },
     grass: {
       id: 'grass',
       label: 'Grass',
       maxCalories: 150,
-      growthPerTick: 2.5,
       color: '#5aaa3a',
       accent: '#7cc84a',
-      size: 6,
-      spawnWeight: 5,
+      size: 12,
+    },
+    berry_bush: {
+      id: 'berry_bush',
+      label: 'Berry Bush',
+      maxCalories: 250,
+      color: '#3a8a2a',
+      accent: '#c44',
+      size: 20,
     },
     mushroom: {
       id: 'mushroom',
       label: 'Mushroom',
       maxCalories: 200,
-      growthPerTick: 2.0,
       color: '#8a5a3a',
       accent: '#c08050',
-      size: 7,
-      spawnWeight: 2,
+      size: 14,
     },
     fruit_tree: {
       id: 'fruit_tree',
       label: 'Fruit Tree',
       maxCalories: 2000,
-      growthPerTick: 1.75,
       color: '#2a6a1e',
       accent: '#e06040',
-      size: 14,
-      spawnWeight: 1,
+      size: 28,
     },
     cactus: {
       id: 'cactus',
       label: 'Cactus',
       maxCalories: 175,
-      growthPerTick: 1.5,
       color: '#4a8a4a',
       accent: '#6ab06a',
-      size: 9,
-      spawnWeight: 1,
+      size: 18,
     },
   };
 
   const SPECIES_LIST = Object.keys(PLANT_SPECIES);
-  const START_CALORIES = 10;
-  /** 2765 seconds (~46.1 min) at 0.5s/tick → 5530 ticks. (10% faster than 3072s) */
+  /** 2765 seconds at 0.5s/tick → 5530 ticks. */
   const RESPAWN_DELAY_SECONDS = 2765;
   const RESPAWN_DELAY_TICKS = 5530;
-  /** Fraction of max calories restored on respawn. */
-  const RESPAWN_CALORIE_RATIO = 0.5;
 
   let nextPlantId = 1;
 
@@ -90,15 +77,11 @@
       /** Tile coords for grid systems (kept in sync with x/y). */
       tx: 0,
       ty: 0,
-      calories: START_CALORIES,
+      /** Always spawn fully grown. */
+      calories: def.maxCalories,
       maxCalories: def.maxCalories,
-      growthPerTick: def.growthPerTick,
       alive: true,
-      /** Set true when any animal starts eating; cleared only on respawn. */
-      growthPaused: false,
       respawnTimer: 0,
-      /** 0→1 sprout growth while waiting to respawn. */
-      sproutProgress: 0,
       color: def.color,
       accent: def.accent,
       size: def.size,
@@ -108,85 +91,50 @@
     };
   }
 
-  /** Weighted random species pick. */
+  /** Uniform random species pick (no spawn weights). */
   function pickSpecies(rng) {
-    let total = 0;
-    for (let i = 0; i < SPECIES_LIST.length; i++) {
-      total += PLANT_SPECIES[SPECIES_LIST[i]].spawnWeight;
-    }
-    let roll = rng.float() * total;
-    for (let i = 0; i < SPECIES_LIST.length; i++) {
-      const id = SPECIES_LIST[i];
-      roll -= PLANT_SPECIES[id].spawnWeight;
-      if (roll <= 0) return id;
-    }
-    return SPECIES_LIST[0];
-  }
-
-  /**
-   * Mark growth paused — called when any animal starts eating this plant.
-   * Growth stays off until the plant is fully depleted and respawned.
-   */
-  function pauseGrowth(plant) {
-    plant.growthPaused = true;
+    const i = rng.int ? rng.int(0, SPECIES_LIST.length - 1) : Math.floor(rng.float() * SPECIES_LIST.length);
+    return SPECIES_LIST[i];
   }
 
   /**
    * Consume up to `amount` calories. Returns calories actually eaten.
-   * Marks plant dead (starts 2765s respawn) when calories hit 0 — stays in memory.
-   * First bite also pauses growth for the rest of this life cycle.
+   * When calories hit 0 the plant disappears and starts the 2765s respawn timer.
    */
   function consumePlant(plant, amount) {
     if (!plant.alive || plant.calories <= 0) return 0;
-    plant.growthPaused = true;
     const taken = Math.min(plant.calories, amount);
     plant.calories -= taken;
     if (plant.calories <= 0) {
       plant.calories = 0;
       plant.alive = false;
       plant.respawnTimer = RESPAWN_DELAY_TICKS;
-      plant.sproutProgress = 0;
     }
     return taken;
   }
 
   /**
-   * One ecosystem tick: grow if alive and not being/been eaten, or advance
-   * 2765s (~46.1 min) respawn cooldown.
+   * One ecosystem tick: alive plants do nothing; dead plants count down and
+   * respawn fully grown at a random valid land spot.
    * @param {object} plant
    * @param {function(number,number):{x:number,y:number}|null} findRespawnSpot
    */
   function updatePlant(plant, findRespawnSpot) {
-    if (plant.alive) {
-      // CRITICAL: once any animal starts eating, growth stops until respawn
-      if (!plant.growthPaused && plant.calories < plant.maxCalories) {
-        plant.calories = Math.min(
-          plant.maxCalories,
-          plant.calories + plant.growthPerTick
-        );
-      }
-      plant.sproutProgress = 0;
-      return;
-    }
+    if (plant.alive) return;
 
     plant.respawnTimer -= 1;
-    plant.sproutProgress = Math.max(
-      0,
-      Math.min(1, 1 - plant.respawnTimer / RESPAWN_DELAY_TICKS)
-    );
     if (plant.respawnTimer > 0) return;
 
     const spot = findRespawnSpot ? findRespawnSpot(plant.x, plant.y) : null;
     if (spot) {
       plant.x = spot.x;
       plant.y = spot.y;
+      if (spot.tx != null) plant.tx = spot.tx;
+      if (spot.ty != null) plant.ty = spot.ty;
     }
-    // Respawn at 50% max calories, then resume normal growth from there
-    plant.calories = plant.maxCalories * RESPAWN_CALORIE_RATIO;
+    plant.calories = plant.maxCalories;
     plant.alive = true;
-    plant.growthPaused = false;
     plant.respawnTimer = 0;
-    plant.sproutProgress = 0;
   }
 
   /**
@@ -226,13 +174,10 @@
   Wildborn.plant = {
     PLANT_SPECIES,
     SPECIES_LIST,
-    START_CALORIES,
     RESPAWN_DELAY_TICKS,
     RESPAWN_DELAY_SECONDS,
-    RESPAWN_CALORIE_RATIO,
     createPlant,
     pickSpecies,
-    pauseGrowth,
     consumePlant,
     updatePlant,
     relocateToLand,

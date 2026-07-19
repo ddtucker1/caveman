@@ -1,6 +1,6 @@
 /**
  * Ecosystem animals — herbivores & predators with a shared state machine,
- * hunger, combat, grouping, and asexual reproduction.
+ * hunger, combat, and asexual reproduction.
  *
  * States: IDLE → SEEK_FOOD → EATING → FLEE → ROAM → SLEEP → DEAD
  */
@@ -46,9 +46,9 @@
   /** Herbivores "see" plants within this many tiles (25 × 32 = 800px). */
   const PLANT_SIGHT_TILES = 25;
   const PLANT_SIGHT_RANGE = PLANT_SIGHT_TILES * TILE_SIZE;
-  /** Omnivores detect food/prey within this many tiles while hunting (20 × 32 = 640px). */
-  const OMNIVORE_SIGHT_TILES = 20;
-  const OMNIVORE_SIGHT_RANGE = OMNIVORE_SIGHT_TILES * TILE_SIZE;
+  /** Predators detect food/prey within this many tiles (20 × 32 = 640px). */
+  const PREDATOR_SIGHT_TILES = 20;
+  const PREDATOR_SIGHT_RANGE = PREDATOR_SIGHT_TILES * TILE_SIZE;
 
   // ---------------------------------------------------------------------------
   // Species definitions
@@ -60,111 +60,60 @@
       id: 'rabbit',
       label: 'Rabbit',
       diet: 'herbivore',
-      maxGroupSize: 2,
       speed: 'medium',
-      caloriesNeededPerDay: 30,
       maxCalories: 60,
       maxHealth: 30,
-      defense: 'flee',
       attackPower: 2,
       color: '#c8c0b0',
       size: 8,
-      corpseYield: 1,
     },
     deer: {
       id: 'deer',
       label: 'Deer',
       diet: 'herbivore',
-      maxGroupSize: 8,
       speed: 'medium',
-      caloriesNeededPerDay: 80,
       maxCalories: 160,
       maxHealth: 70,
-      defense: 'flee',
       attackPower: 4,
       color: '#8a6238',
       size: 14,
-      corpseYield: 1,
-    },
-    cow: {
-      id: 'cow',
-      label: 'Cow',
-      diet: 'herbivore',
-      maxGroupSize: 12,
-      speed: 'medium',
-      caloriesNeededPerDay: 150,
-      maxCalories: 300,
-      maxHealth: 120,
-      defense: 'none',
-      attackPower: 3,
-      color: '#d8d0c0',
-      accent: '#333',
-      size: 18,
-      corpseYield: 1,
-    },
-    raccoon: {
-      id: 'raccoon',
-      label: 'Raccoon',
-      diet: 'herbivore',
-      maxGroupSize: 1,
-      speed: 'medium',
-      caloriesNeededPerDay: 50,
-      maxCalories: 100,
-      maxHealth: 40,
-      defense: 'fight',
-      attackPower: 8,
-      color: '#6a6a6a',
-      size: 10,
-      corpseYield: 1,
     },
     bison: {
       id: 'bison',
       label: 'Bison',
       diet: 'herbivore',
-      maxGroupSize: 15,
       speed: 'medium',
-      caloriesNeededPerDay: 200,
       maxCalories: 400,
       maxHealth: 200,
-      defense: 'charge',
       attackPower: 25,
       color: '#5a4030',
       size: 20,
-      corpseYield: 1,
     },
     ostrich: {
       id: 'ostrich',
       label: 'Ostrich',
       diet: 'herbivore',
-      maxGroupSize: 4,
       speed: 'medium',
-      caloriesNeededPerDay: 70,
       maxCalories: 140,
       maxHealth: 80,
-      defense: 'kick',
       attackPower: 18,
       color: '#b09060',
       size: 16,
-      corpseYield: 1,
     },
     turtle: {
       id: 'turtle',
       label: 'Turtle',
       diet: 'herbivore',
-      maxGroupSize: 1,
       speed: 'medium',
       aquatic: true,
       /** 24 px/s in water with herbivore (30) land speed. */
       waterSpeedMult: 24 / HERBIVORE_LAND_SPEED,
-      caloriesNeededPerDay: 40,
       maxCalories: 80,
       maxHealth: 150,
-      defense: 'flee',
       attackPower: 2,
       color: '#3a6a3a',
       accent: '#2a4a2a',
       size: 11,
-      corpseYield: 1,
     },
   };
 
@@ -174,111 +123,63 @@
       id: 'wolf',
       label: 'Wolf',
       diet: 'predator',
-      maxGroupSize: 6,
       speed: 'predator',
-      caloriesNeededPerDay: 100,
       maxCalories: 200,
       maxHealth: 90,
       attackStyle: 'bite',
       attackPower: 22,
       color: '#7a7a88',
       size: 13,
-      corpseYield: 1,
-    },
-    lion: {
-      id: 'lion',
-      label: 'Lion',
-      diet: 'predator',
-      maxGroupSize: 5,
-      speed: 'predator',
-      caloriesNeededPerDay: 150,
-      maxCalories: 300,
-      maxHealth: 140,
-      attackStyle: 'claw',
-      attackPower: 30,
-      color: '#c9a045',
-      size: 17,
-      corpseYield: 1,
-    },
-    panther: {
-      id: 'panther',
-      label: 'Panther',
-      diet: 'predator',
-      maxGroupSize: 1,
-      speed: 'predator',
-      caloriesNeededPerDay: 90,
-      maxCalories: 180,
-      maxHealth: 100,
-      attackStyle: 'pounce',
-      attackPower: 28,
-      color: '#1a1a22',
-      size: 14,
-      corpseYield: 1,
     },
     bear: {
       id: 'bear',
       label: 'Bear',
-      diet: 'omnivore',
-      maxGroupSize: 2,
+      diet: 'predator',
       speed: 'predator',
-      caloriesNeededPerDay: 250,
       maxCalories: 500,
       maxHealth: 220,
       attackStyle: 'swipe',
       attackPower: 40,
       color: '#4a3020',
       size: 20,
-      corpseYield: 1,
     },
     alligator: {
       id: 'alligator',
       label: 'Alligator',
       diet: 'predator',
-      maxGroupSize: 1,
       speed: 'predator',
       aquatic: true,
       /** 54 px/s in water with predator (36) land speed. */
       waterSpeedMult: 54 / PREDATOR_LAND_SPEED,
-      caloriesNeededPerDay: 180,
       maxCalories: 360,
       maxHealth: 180,
       attackStyle: 'death_roll',
       attackPower: 35,
       color: '#2a5a2a',
       size: 18,
-      corpseYield: 1,
     },
   };
 
   const ALL_SPECIES = Object.assign({}, HERBIVORE_SPECIES, PREDATOR_SPECIES);
 
   // Timing / thresholds
-  /** 600s (10 min) reproduction cooldown at 0.5s/tick → 1200 ticks. */
+  /** 600s (10 min) herbivore reproduction cooldown at 0.5s/tick → 1200 ticks. */
   const BREED_COOLDOWN = 1200;
-  /** Omnivores wait twice as long between offspring (1200s / 20 min → 2400 ticks). */
-  const OMNIVORE_BREED_COOLDOWN = BREED_COOLDOWN * 2;
+  /** 1200s (20 min) predator reproduction cooldown → 2400 ticks. */
+  const PREDATOR_BREED_COOLDOWN = BREED_COOLDOWN * 2;
   /** Calories must be ≥ 80% of max to reproduce. */
   const BREED_CALORIE_RATIO = 0.8;
-  /** Enter SEARCHING_FOR_FOOD at ≤50% calories. */
+  /** Enter SEARCHING_FOR_FOOD / hunting at ≤50% calories. */
   const HUNGER_SEEK_RATIO = 0.5;
-  /** Leave hunger-search and resume normal behavior at ≥60%. */
-  const HUNGER_RETURN_RATIO = 0.6;
-  /** Ticks in one "day" for calorie drain (120 × 0.5s ≈ 60s real time). */
-  const DAY_TICKS = 120;
-  /** Global calorie burn scale — animals previously burned ~10× too fast. */
-  const CALORIE_BURN_DIVISOR = 10;
-  /** Herbivores (plant eaters) burn calories 20% slower than the scaled daily-need rate. */
-  const HERBIVORE_CALORIE_BURN_MULT = 0.8;
-  /** Animal eaters (pure predators) burn calories 50% faster than the flat base rate. */
-  const PREDATOR_CALORIE_BURN_MULT = 1.5;
-  /** Omnivores burn calories 30% faster than the flat base predator rate. */
-  const OMNIVORE_CALORIE_BURN_MULT = 1.3;
-  /** Minimum calories burned per ecosystem tick. */
-  const MIN_CALORIE_BURN = 0.5;
+  /** Leave hunger-search and resume normal behavior at ≥70%. */
+  const HUNGER_RETURN_RATIO = 0.7;
+  /** Herbivores burn 1 calorie every 12 seconds. */
+  const HERBIVORE_CALORIE_BURN_INTERVAL_SEC = 12;
+  /** Predators burn 1 calorie every 8 seconds. */
+  const PREDATOR_CALORIE_BURN_INTERVAL_SEC = 8;
   /** Animals must be within 20px of a plant to eat it. */
   const EAT_RANGE = 20;
   const ATTACK_RANGE = 22;
-  const FLEE_DETECT_RANGE = 160;
   /** Herbivores enter FLEE when a predator is within this range. */
   const FLEE_ENTER_RANGE = 100;
   /** Herbivores stop fleeing once the predator is this far away. */
@@ -288,35 +189,20 @@
    * actively targeting this animal (stubborn eating).
    */
   const EAT_PREDATOR_INTERRUPT_RANGE = 50;
-  /**
-   * Default food/prey detect for pure predators: 8 tiles = 256px.
-   * Herbivores use PLANT_SIGHT_RANGE; omnivores use OMNIVORE_SIGHT_RANGE.
-   */
-  const FOOD_DETECT_RANGE = 8 * TILE_SIZE;
   /** Plant eating: 5 calories per second per animal (real-time in updateEating). Stacks. */
   const EAT_RATE_PER_SEC = 5;
-  /** Base predator burn: 1 calorie every 10 seconds (scaled by diet multipliers). */
-  const PREDATOR_CALORIE_BURN_PER_SEC = 0.1;
-  /** Corpse transfer rate (calories per ecosystem tick). */
-  const EAT_RATE = 6;
   const ATTACK_COOLDOWN_TICKS = 2;
-  const IDLE_WANDER_CHANCE = 0.35;
   /** Recompute grid path at most this often (seconds). */
   const PATH_REPATH_SECONDS = 0.45;
 
-  /** Predators hunt at ≤30% calories; return to roaming at ≥80%. */
-  const PREDATOR_HUNT_RATIO = 0.3;
-  /** Omnivores skip the 30% hunt gate — actively hunt prey at ≤50% calories. */
-  const OMNIVORE_HUNT_RATIO = 0.5;
-  /** Omnivores attack other omnivore species for food at ≤25% calories. */
-  const OMNIVORE_ATTACK_OTHER_SPECIES_RATIO = 0.25;
-  /** Omnivores attack their own species for food at ≤10% calories. */
-  const OMNIVORE_ATTACK_OWN_SPECIES_RATIO = 0.1;
-  /** Pure predators attack other predators when critically starved. */
-  const PREDATOR_RIVAL_HUNT_RATIO = 0.15;
-  const PREDATOR_SATIATED_RATIO = 0.8;
-  /** Omnivore prey search expands faster than herbivore plant search (tiles/sec). */
-  const OMNIVORE_SEARCH_EXPAND_TILES_PER_SEC = 5;
+  /** All predators hunt for food at ≤50% calories. */
+  const PREDATOR_HUNT_RATIO = 0.5;
+  /** Predators attack other predators (any species) at ≤25% calories. */
+  const PREDATOR_RIVAL_HUNT_RATIO = 0.25;
+  /** Stop hunting / leave search at ≥70% calories. */
+  const PREDATOR_SATIATED_RATIO = HUNGER_RETURN_RATIO;
+  /** Predator prey search expands faster than herbivore plant search (tiles/sec). */
+  const PREDATOR_SEARCH_EXPAND_TILES_PER_SEC = 5;
   /** Roam within this radius of spawn while not hunting. */
   const TERRITORY_RADIUS = 200;
   /**
@@ -367,7 +253,7 @@
    * @param {string} speciesId
    * @param {number} x
    * @param {number} y
-   * @param {{ isOffspring?: boolean, groupId?: number, sex?: string }} [opts]
+   * @param {{ isOffspring?: boolean, sex?: string }} [opts]
    */
   function createAnimal(speciesId, x, y, opts) {
     opts = opts || {};
@@ -380,8 +266,8 @@
     // Animals have no age — born as full-health adults.
     const startCal = maxCal * 0.85 + Math.random() * maxCal * 0.1;
 
-    const isPred = def.diet === 'predator' || def.diet === 'omnivore';
-    // All predators/omnivores: 36 land; all herbivores: 30 land.
+    const isPred = def.diet === 'predator';
+    // All predators: 36 land; all herbivores: 30 land.
     const baseSpeed = Math.max(
       MIN_SPEED,
       isPred ? PREDATOR_LAND_SPEED : HERBIVORE_LAND_SPEED
@@ -403,7 +289,6 @@
 
       calories: startCal,
       maxCalories: maxCal,
-      caloriesNeededPerDay: def.caloriesNeededPerDay,
       health: def.maxHealth,
       maxHealth: def.maxHealth,
 
@@ -411,7 +296,6 @@
       breedingCooldown: isOffspring
         ? breedCooldownFor(def.diet)
         : Math.floor(Math.random() * breedCooldownFor(def.diet)),
-      growth: 1,
       isAdult: true,
 
       state: isPred ? AI_STATE.ROAM : AI_STATE.IDLE,
@@ -430,12 +314,7 @@
       /** True while in hunger-search (≤50% calories, orange eyes). */
       _hungerSearch: false,
       /** Expanding food detect radius while hunger-searching / hunting. */
-      _searchRadius:
-        def.diet === 'omnivore'
-          ? OMNIVORE_SIGHT_RANGE
-          : def.diet === 'herbivore'
-            ? PLANT_SIGHT_RANGE
-            : FOOD_DETECT_RANGE,
+      _searchRadius: isPred ? PREDATOR_SIGHT_RANGE : PLANT_SIGHT_RANGE,
       /** Spiral-search state for predators in hunger-search. */
       _spiralAngle: 0,
       _spiralRadius: 0,
@@ -455,8 +334,6 @@
       /** True while walking back inside territory after straying past the rim. */
       _returningHome: false,
 
-      groupId: opts.groupId != null ? opts.groupId : 0,
-      maxGroupSize: def.maxGroupSize,
       sex: opts.sex || (Math.random() < 0.5 ? 'male' : 'female'),
 
       speedKey: def.speed,
@@ -474,10 +351,7 @@
               ? PREDATOR_WATER_SPEED_MULT
               : HERBIVORE_WATER_SPEED_MULT,
       attackPower: def.attackPower || 5,
-      // Predators never flee; herbivores default to fleeing when hit.
-      defense: def.defense || (isPred ? 'none' : 'flee'),
       attackStyle: def.attackStyle || null,
-      corpseYield: def.corpseYield != null ? def.corpseYield : 1,
 
       color: def.color,
       accent: def.accent || null,
@@ -495,32 +369,16 @@
 
   /**
    * Per-tick calorie drain.
-   * Animal eaters / pure predators (wolf/lion/panther/alligator): flat 0.1 cal/sec
-   *   → PREDATOR_CALORIE_BURN_PER_SEC × ecosystemTickSeconds × PREDATOR_CALORIE_BURN_MULT
-   *   (50% faster).
-   * Omnivores (bear): same flat base × OMNIVORE_CALORIE_BURN_MULT (30% faster).
-   * Plant eaters / herbivores: (daily need / DAY_TICKS) / 10, rounded to 1 decimal,
-   *   then × HERBIVORE_CALORIE_BURN_MULT (20% slower).
-   * Floor at MIN_CALORIE_BURN (0.5). Species whose scaled rate is below the floor
-   * keep a 2-decimal scaled value so small animals are not forced to burn faster.
+   * Herbivores: 1 calorie every 12 seconds.
+   * Predators: 1 calorie every 8 seconds.
    */
   function calorieBurnPerTick(animal) {
-    // Flat predator burn — all PREDATOR_SPECIES; animal eaters ×1.5, omnivores ×1.3
-    if (PREDATOR_SPECIES[animal.species]) {
-      const tickSec =
-        (Wildborn.config && Wildborn.config.ecosystemTickSeconds) || 0.5;
-      const base = PREDATOR_CALORIE_BURN_PER_SEC * tickSec;
-      if (animal.diet === 'omnivore') return base * OMNIVORE_CALORIE_BURN_MULT;
-      return base * PREDATOR_CALORIE_BURN_MULT;
+    const tickSec =
+      (Wildborn.config && Wildborn.config.ecosystemTickSeconds) || 0.5;
+    if (PREDATOR_SPECIES[animal.species] || animal.diet === 'predator') {
+      return tickSec / PREDATOR_CALORIE_BURN_INTERVAL_SEC;
     }
-    const raw = animal.caloriesNeededPerDay / DAY_TICKS / CALORIE_BURN_DIVISOR;
-    const rounded = Math.round(raw * 10) / 10;
-    const scaled =
-      rounded >= MIN_CALORIE_BURN
-        ? rounded
-        : // Preserve relative differences for sub-0.5 scaled rates (still ~10× slower)
-          Math.max(0.1, Math.round(raw * 100) / 100);
-    return scaled * HERBIVORE_CALORIE_BURN_MULT;
+    return tickSec / HERBIVORE_CALORIE_BURN_INTERVAL_SEC;
   }
 
   // ---------------------------------------------------------------------------
@@ -528,16 +386,16 @@
   // ---------------------------------------------------------------------------
 
   function isHerbivore(a) {
-    return a.diet === 'herbivore' || a.diet === 'omnivore';
+    return a.diet === 'herbivore';
   }
 
   function isPredator(a) {
-    return a.diet === 'predator' || a.diet === 'omnivore';
+    return a.diet === 'predator';
   }
 
-  /** Reproduction cooldown ticks for a diet (omnivores wait 2× longer). */
+  /** Reproduction cooldown ticks: herbivores 10 min, predators 20 min. */
   function breedCooldownFor(diet) {
-    return diet === 'omnivore' ? OMNIVORE_BREED_COOLDOWN : BREED_COOLDOWN;
+    return diet === 'predator' ? PREDATOR_BREED_COOLDOWN : BREED_COOLDOWN;
   }
 
   /** Ready to reproduce asexually: calories ≥ 80%, cooldown expired. */
@@ -551,9 +409,7 @@
   }
 
   function defaultRestState(animal) {
-    return isPredator(animal) && animal.diet !== 'herbivore'
-      ? AI_STATE.ROAM
-      : AI_STATE.IDLE;
+    return isPredator(animal) ? AI_STATE.ROAM : AI_STATE.IDLE;
   }
 
   function enterSleep(animal) {
@@ -588,38 +444,31 @@
   }
 
   /**
-   * Starving omnivores turn on other omnivores for food:
-   * ≤25% → other omnivore species; ≤10% → own species as well.
+   * Starving predators turn on other predators for food at ≤25% calories
+   * (same species or different species).
    */
-  function canAttackOmnivoreRival(attacker, target) {
+  function canAttackPredatorRival(attacker, target) {
     if (!attacker || !target) return false;
-    if (attacker.diet !== 'omnivore' || target.diet !== 'omnivore') return false;
+    if (!isPredator(attacker) || !isPredator(target)) return false;
     if (!target.alive || target.id === attacker.id) return false;
-    const ratio = hungerRatio(attacker);
-    if (ratio <= OMNIVORE_ATTACK_OWN_SPECIES_RATIO) return true;
-    if (ratio <= OMNIVORE_ATTACK_OTHER_SPECIES_RATIO) {
-      return target.species !== attacker.species;
-    }
-    return false;
+    return hungerRatio(attacker) <= PREDATOR_RIVAL_HUNT_RATIO;
   }
 
-  /** Calories ratio at which an animal enters active prey hunting. */
-  function huntThreshold(animal) {
-    if (animal.diet === 'omnivore') return OMNIVORE_HUNT_RATIO;
+  /** Calories ratio at which a predator enters active prey hunting. */
+  function huntThreshold(_animal) {
     return PREDATOR_HUNT_RATIO;
   }
 
   function baseFoodSightRange(animal) {
-    if (animal.diet === 'omnivore') return OMNIVORE_SIGHT_RANGE;
     if (animal.diet === 'herbivore') return PLANT_SIGHT_RANGE;
-    return FOOD_DETECT_RANGE;
+    return PREDATOR_SIGHT_RANGE;
   }
 
   function initialSearchRadius(animal) {
     return baseFoodSightRange(animal);
   }
 
-  /** Begin map-wide prey hunt (omnivores at ≤50%, predators at ≤30%). */
+  /** Begin map-wide prey hunt (all predators at ≤50%). */
   function enterPreyHunt(animal) {
     animal._hunting = true;
     animal._hungerSearch = false;
@@ -1583,7 +1432,7 @@
       return dmg;
     }
     // Predators never get scared of prey — keep attacking until the target is dead.
-    if (isPredator(target) && target.diet !== 'herbivore') {
+    if (isPredator(target)) {
       target.fleeFrom = null;
       target._counterAttack = false;
       if (attacker && attacker.alive && attacker.state !== AI_STATE.DEAD) {
@@ -1595,18 +1444,10 @@
       }
       return dmg;
     }
-    // Defensive reactions (herbivores / prey)
-    if (target.defense === 'flee') {
-      target.state = AI_STATE.FLEE;
-      target.fleeFrom = attacker;
-      target.stateTimer = 2.5;
-    } else if (target.defense === 'fight' || target.defense === 'charge' || target.defense === 'kick') {
-      target.state = AI_STATE.FLEE; // reuse flee state as "combat engage"
-      target.fleeFrom = attacker;
-      target.target = attacker;
-      target.stateTimer = 3;
-      target._counterAttack = true;
-    }
+    // Herbivores always flee when hit
+    target.state = AI_STATE.FLEE;
+    target.fleeFrom = attacker;
+    target.stateTimer = 2.5;
     return dmg;
   }
 
@@ -1616,8 +1457,8 @@
     animal.health = 0;
     animal.vx = 0;
     animal.vy = 0;
-    // Dead bodies offer 100% of the animal's full calorie capacity to scavengers.
-    animal.corpseCalories = animal.maxCalories * animal.corpseYield;
+    // Corpses yield only the calories the creature had at death.
+    animal.corpseCalories = Math.max(0, animal.calories);
     animal.corpseDecay = CORPSE_DECAY_TICKS; // 1 minute onscreen
     animal.deadAt = null; // render sets wall-clock time on first draw
     animal.target = null;
@@ -1635,7 +1476,6 @@
   function breed(parent) {
     const kid = createAnimal(parent.species, parent.x, parent.y, {
       isOffspring: true,
-      groupId: parent.groupId,
     });
     parent.breedingCooldown = breedCooldownFor(parent.diet);
     return [kid];
@@ -1661,8 +1501,8 @@
       animal._inWater = ctx.isWater(animal.x, animal.y);
     }
 
-    // Predator/omnivore hunger gate: predators hunt ≤30%; omnivores hunt prey ≤50%
-    if (isPredator(animal) && animal.diet !== 'herbivore' && animal.state !== AI_STATE.SLEEP) {
+    // Predator hunger gate: all predators hunt at ≤50%
+    if (isPredator(animal) && animal.state !== AI_STATE.SLEEP) {
       updatePredatorHungerGate(animal);
     }
 
@@ -1698,10 +1538,8 @@
   }
 
   /**
-   * Predators: ROAM while calories > 50%; hunger-search at ≤50%;
-   * enter SEEK_PREY hunt at ≤30%; stay hunting until calories ≥ 80%, then ROAM.
-   * Omnivores: no 30% hunt gate — enter active prey hunt at ≤50% calories.
-   * Hunger-search (not full hunt) returns to ROAM at ≥60%.
+   * Predators: ROAM while calories > 50%; enter SEEK_PREY hunt at ≤50%;
+   * stay hunting until calories ≥ 70%, then ROAM.
    */
   function updatePredatorHungerGate(animal) {
     const ratio = hungerRatio(animal);
@@ -1709,15 +1547,8 @@
 
     const threshold = huntThreshold(animal);
 
-    // Omnivores: at ≤50% immediately hunt prey map-wide (no intermediate hunger-search)
-    if (animal.diet === 'omnivore' && ratio <= threshold) {
-      if (!animal._hunting) enterPreyHunt(animal);
-      else if (animal.state !== AI_STATE.EATING) animal.state = AI_STATE.SEEK_PREY;
-      return;
-    }
-
-    // Pure predators: full hunt mode at ≤30%
-    if (animal.diet !== 'omnivore' && ratio <= threshold) {
+    // All predators: full hunt mode at ≤50%
+    if (ratio <= threshold) {
       if (!animal._hunting) enterPreyHunt(animal);
       else if (animal.state !== AI_STATE.EATING) animal.state = AI_STATE.SEEK_PREY;
       return;
@@ -1735,31 +1566,11 @@
       return;
     }
 
-    // Predator hunger-search band (30%–50%]: seek food, return at ≥60%
-    // Omnivores never use this band — they hunt at 50%.
-    if (animal.diet === 'omnivore') {
-      if (animal.state === AI_STATE.IDLE) animal.state = AI_STATE.ROAM;
-      return;
-    }
-
-    if (animal._hungerSearch || animal.state === AI_STATE.SEEK_FOOD || animal.state === AI_STATE.EATING) {
-      if (animal._hungerSearch && ratio >= HUNGER_RETURN_RATIO && animal.state !== AI_STATE.EATING) {
-        clearHungerSearch(animal);
-        animal.state = AI_STATE.ROAM;
-        animal.target = null;
-      }
-      return;
-    }
-
-    if (ratio <= HUNGER_SEEK_RATIO) {
-      enterHungerSearch(animal);
-    } else if (animal.state === AI_STATE.IDLE) {
-      animal.state = AI_STATE.ROAM;
-    }
+    if (animal.state === AI_STATE.IDLE) animal.state = AI_STATE.ROAM;
   }
 
   /**
-   * Shared hunger-search entry/exit for herbivores (and any non-hunt path).
+   * Shared hunger-search entry/exit for herbivores.
    * Predators are primarily handled by updatePredatorHungerGate.
    */
   function maybeUpdateHungerSearch(animal, dt) {
@@ -1770,12 +1581,8 @@
     ) {
       return;
     }
-    // Predators in hunt mode skip the shared 50% search helper
-    if (isPredator(animal) && animal.diet !== 'herbivore' && animal._hunting) {
-      return;
-    }
     // Predators already gated above
-    if (isPredator(animal) && animal.diet !== 'herbivore') {
+    if (isPredator(animal)) {
       return;
     }
 
@@ -1799,19 +1606,8 @@
 
   function updateRoam(animal, dt, ctx) {
     // Drop into hunt immediately if calories crossed the threshold mid-frame
-    if (hungerRatio(animal) <= huntThreshold(animal)) {
+    if (isPredator(animal) && hungerRatio(animal) <= huntThreshold(animal)) {
       enterPreyHunt(animal);
-      return;
-    }
-
-    // Predators: hunger-search at ≤50% — leave territory roaming
-    // Omnivores already hunt at 50%, so they skip this band.
-    if (
-      animal.diet !== 'omnivore' &&
-      hungerRatio(animal) <= HUNGER_SEEK_RATIO &&
-      !animal._hunting
-    ) {
-      enterHungerSearch(animal);
       return;
     }
 
@@ -1854,22 +1650,17 @@
   }
 
   /**
-   * Nearest living predator or omnivore within range.
-   * Herbivores flee from both on sight.
+   * Nearest living predator within range.
+   * Herbivores flee from predators on sight.
    */
   function findPredatorThreat(animal, ctx, range) {
     if (!ctx || !ctx.findNearestAnimal) return null;
     return ctx.findNearestAnimal(animal.x, animal.y, range, function (o) {
-      return (
-        o.alive &&
-        isPredator(o) &&
-        o.diet !== 'herbivore' &&
-        o.id !== animal.id
-      );
+      return o.alive && isPredator(o) && o.id !== animal.id;
     });
   }
 
-  /** Enter FLEE from a seen predator/omnivore. */
+  /** Enter FLEE from a seen predator. */
   function beginFleeFromThreat(animal, threat) {
     animal.idleAccum = 0;
     animal.target = null;
@@ -1882,12 +1673,12 @@
 
   function updateIdle(animal, dt, ctx) {
     // Predators use ROAM instead of IDLE
-    if (isPredator(animal) && animal.diet !== 'herbivore') {
+    if (isPredator(animal)) {
       animal.state = AI_STATE.ROAM;
       return;
     }
 
-    // Threat scan — herbivores run from predators and omnivores on sight
+    // Threat scan — herbivores run from predators on sight
     if (animal.diet === 'herbivore') {
       const threat = findPredatorThreat(animal, ctx, FLEE_ENTER_RANGE);
       if (threat) {
@@ -1987,7 +1778,7 @@
   }
 
   function findNearbyWakeFood(animal, ctx) {
-    if (isPredator(animal) && animal.diet !== 'herbivore') {
+    if (isPredator(animal)) {
       const prey = ctx.findNearestAnimal(
         animal.x,
         animal.y,
@@ -1999,10 +1790,7 @@
       if (prey) return prey;
     }
     // Herbivores: only wake for plants once no longer fully satiated
-    if (
-      (animal.diet === 'herbivore' || animal.diet === 'omnivore') &&
-      hungerRatio(animal) < SLEEP_ENTER_RATIO
-    ) {
+    if (animal.diet === 'herbivore' && hungerRatio(animal) < SLEEP_ENTER_RATIO) {
       const plant = ctx.findNearestPlant(
         animal.x,
         animal.y,
@@ -2017,7 +1805,7 @@
   }
 
   function updateSeekFood(animal, dt, ctx) {
-    // Herbivores abandon food search and flee when they see a predator/omnivore
+    // Herbivores abandon food search and flee when they see a predator
     if (animal.diet === 'herbivore') {
       const threat = findPredatorThreat(animal, ctx, FLEE_ENTER_RANGE);
       if (threat) {
@@ -2031,7 +1819,7 @@
       updateHungerSearchMovement(animal, dt, ctx);
     }
 
-    // Predators seek herbivores (or corpses); herbivores seek plants only; omnivores do both
+    // Predators seek herbivores (or corpses); herbivores seek plants only
     if (!animal.target || !isValidFoodTarget(animal, animal.target)) {
       animal.target = findFoodTarget(animal, ctx);
     }
@@ -2072,14 +1860,13 @@
 
   /**
    * Herbivores: grow search radius +2 tiles/sec when nothing in sight.
-   * Omnivores / hunting predators: grow faster while searching map-wide.
+   * Hunting predators: grow faster while searching map-wide.
    */
   function updateHungerSearchMovement(animal, dt, ctx) {
     const cap = mapSearchCap(ctx);
     const prev = animal._searchRadius || initialSearchRadius(animal);
     let tilesPerSec = 2;
-    if (animal.diet === 'omnivore') tilesPerSec = OMNIVORE_SEARCH_EXPAND_TILES_PER_SEC;
-    else if (animal._hunting) tilesPerSec = 3;
+    if (animal._hunting) tilesPerSec = PREDATOR_SEARCH_EXPAND_TILES_PER_SEC;
     animal._searchRadius = Math.min(cap, prev + tilesPerSec * TILE_SIZE * dt);
   }
 
@@ -2110,25 +1897,16 @@
 
   function isValidFoodTarget(animal, t) {
     if (!t) return false;
-    if (t.kind === 'plant') return t.alive && t.calories > 0;
+    if (t.kind === 'plant') return animal.diet === 'herbivore' && t.alive && t.calories > 0;
     if (t.kind === 'animal') {
       // Herbivores never eat animals (living or dead) — plants only.
       if (animal.diet === 'herbivore') return false;
       if (t.state === AI_STATE.DEAD) return t.corpseCalories > 0;
       if (!t.alive) return false;
-      // Live prey
+      // Live herbivore prey
       if (isPredator(animal) && t.diet === 'herbivore') return true;
-      // Starving omnivores attack other omnivores (25% other species / 10% own)
-      if (canAttackOmnivoreRival(animal, t)) return true;
-      // Desperate pure predators fight other predators / omnivores
-      if (
-        animal.diet === 'predator' &&
-        isPredator(t) &&
-        isHungry(animal) &&
-        t.id !== animal.id
-      ) {
-        return true;
-      }
+      // Starving predators attack other predators (any species) at ≤25%
+      if (canAttackPredatorRival(animal, t)) return true;
       return false;
     }
     return false;
@@ -2145,7 +1923,7 @@
   function findFoodTarget(animal, ctx) {
     const detect = foodDetectRange(animal);
 
-    // Predators / omnivores prefer corpses; herbivores never eat dead animals.
+    // Predators prefer corpses; herbivores never eat dead animals.
     if (isPredator(animal)) {
       const corpse = ctx.findNearestAnimal(
         animal.x,
@@ -2161,9 +1939,7 @@
     if (
       animal.diet === 'predator' ||
       animal.state === AI_STATE.SEEK_PREY ||
-      animal._hunting ||
-      (animal.diet === 'omnivore' && (animal._hunting || animal._hungerSearch || isHungry(animal))) ||
-      (animal._hungerSearch && isPredator(animal))
+      animal._hunting
     ) {
       const prey = ctx.findNearestAnimal(
         animal.x,
@@ -2175,45 +1951,8 @@
       );
       if (prey) return prey;
 
-      // Omnivores: turn on other omnivores when calories get critically low.
-      // ≤25% → other omnivore species; ≤10% → own species too.
-      if (animal.diet === 'omnivore') {
-        const ratio = hungerRatio(animal);
-        const rivalRange = detect * 0.45;
-        if (ratio <= OMNIVORE_ATTACK_OTHER_SPECIES_RATIO) {
-          const otherOmnivore = ctx.findNearestAnimal(
-            animal.x,
-            animal.y,
-            rivalRange,
-            function (o) {
-              return (
-                o.alive &&
-                o.diet === 'omnivore' &&
-                o.species !== animal.species &&
-                o.id !== animal.id
-              );
-            }
-          );
-          if (otherOmnivore) return otherOmnivore;
-        }
-        if (ratio <= OMNIVORE_ATTACK_OWN_SPECIES_RATIO) {
-          const ownSpecies = ctx.findNearestAnimal(
-            animal.x,
-            animal.y,
-            rivalRange,
-            function (o) {
-              return (
-                o.alive &&
-                o.diet === 'omnivore' &&
-                o.species === animal.species &&
-                o.id !== animal.id
-              );
-            }
-          );
-          if (ownSpecies) return ownSpecies;
-        }
-      } else if (animal.diet === 'predator' && hungerRatio(animal) < PREDATOR_RIVAL_HUNT_RATIO) {
-        // Desperate pure predators: attack other predators / omnivores
+      // Desperate predators: attack other predators (same or different species) at ≤25%
+      if (hungerRatio(animal) <= PREDATOR_RIVAL_HUNT_RATIO) {
         const rival = ctx.findNearestAnimal(
           animal.x,
           animal.y,
@@ -2226,7 +1965,7 @@
       }
     }
 
-    if (animal.diet === 'herbivore' || animal.diet === 'omnivore') {
+    if (animal.diet === 'herbivore') {
       const plant = ctx.findNearestPlant(
         animal.x,
         animal.y,
@@ -2273,7 +2012,6 @@
         return (
           o.alive &&
           isPredator(o) &&
-          o.diet !== 'herbivore' &&
           o.id !== animal.id &&
           o.target === animal
         );
@@ -2375,9 +2113,7 @@
 
     // Plants: continuous 5 cal/sec — stubborn commit until full / depleted / predator.
     // Multiple eaters stack (3 animals → 15 cal/sec from the plant).
-    // Growth stops immediately once eating starts (until depleted + respawn).
     if (t.kind === 'plant' && t.alive) {
-      if (Wildborn.plant.pauseGrowth) Wildborn.plant.pauseGrowth(t);
       animal.eatLocked = true;
       // Locked-in head shake every 3 seconds
       animal._eatLockShake = (animal._eatLockShake || 0) + dt;
@@ -2431,7 +2167,7 @@
     animal.stateTimer -= dt;
 
     // Predators never flee — resume attacking the threat until it is dead.
-    if (isPredator(animal) && animal.diet !== 'herbivore') {
+    if (isPredator(animal)) {
       const threat = animal.fleeFrom || animal.target;
       animal.fleeFrom = null;
       animal._counterAttack = false;
@@ -2487,7 +2223,7 @@
       return;
     }
 
-    // Non-herbivore flee (timer-based) — omnivore/other edge cases only
+    // Non-herbivore flee (timer-based) — edge cases only
     if (animal.stateTimer <= 0) {
       animal.fleeFrom = null;
       animal.state = defaultRestState(animal);
@@ -2523,7 +2259,7 @@
       return result;
     }
 
-    // Hunger drain: animal eaters ×1.5; omnivores ×1.3; plant eaters ÷10 × 0.8
+    // Hunger drain: herbivores 1/12 cal/s; predators 1/8 cal/s
     // Sleeping: conservation mode — half burn
     let drain = calorieBurnPerTick(animal);
     if (animal.state === AI_STATE.SLEEP) drain *= 0.5;
@@ -2565,9 +2301,9 @@
     return result;
   }
 
-  /** After eating: predators keep hunting until 80%, else roam/idle. */
+  /** After eating: predators keep hunting until 70%, else roam/idle. */
   function postEatState(animal) {
-    if (isPredator(animal) && animal.diet !== 'herbivore') {
+    if (isPredator(animal)) {
       if (animal._hunting) {
         if (hungerRatio(animal) >= PREDATOR_SATIATED_RATIO) {
           animal._hunting = false;
@@ -2575,13 +2311,6 @@
           return AI_STATE.ROAM;
         }
         return AI_STATE.SEEK_PREY;
-      }
-      if (animal._hungerSearch) {
-        if (hungerRatio(animal) >= HUNGER_RETURN_RATIO) {
-          clearHungerSearch(animal);
-          return AI_STATE.ROAM;
-        }
-        return AI_STATE.SEEK_FOOD;
       }
       return AI_STATE.ROAM;
     }
@@ -2627,21 +2356,13 @@
     PREDATOR_SPECIES,
     ALL_SPECIES,
     BREED_COOLDOWN,
-    OMNIVORE_BREED_COOLDOWN,
+    PREDATOR_BREED_COOLDOWN,
     BREED_CALORIE_RATIO,
     HUNGER_SEEK_RATIO,
     HUNGER_RETURN_RATIO,
-    DAY_TICKS,
-    CALORIE_BURN_DIVISOR,
-    HERBIVORE_CALORIE_BURN_MULT,
-    PREDATOR_CALORIE_BURN_MULT,
-    OMNIVORE_CALORIE_BURN_MULT,
-    MIN_CALORIE_BURN,
-    PREDATOR_CALORIE_BURN_PER_SEC,
+    HERBIVORE_CALORIE_BURN_INTERVAL_SEC,
+    PREDATOR_CALORIE_BURN_INTERVAL_SEC,
     PREDATOR_HUNT_RATIO,
-    OMNIVORE_HUNT_RATIO,
-    OMNIVORE_ATTACK_OTHER_SPECIES_RATIO,
-    OMNIVORE_ATTACK_OWN_SPECIES_RATIO,
     PREDATOR_RIVAL_HUNT_RATIO,
     PREDATOR_SATIATED_RATIO,
     TERRITORY_RADIUS,
@@ -2649,11 +2370,10 @@
     FLEE_ENTER_RANGE,
     FLEE_SAFE_RANGE,
     EAT_PREDATOR_INTERRUPT_RANGE,
-    FOOD_DETECT_RANGE,
     PLANT_SIGHT_RANGE,
     PLANT_SIGHT_TILES,
-    OMNIVORE_SIGHT_RANGE,
-    OMNIVORE_SIGHT_TILES,
+    PREDATOR_SIGHT_RANGE,
+    PREDATOR_SIGHT_TILES,
     EAT_RANGE,
     EAT_RATE_PER_SEC,
     WATER_SPEED_MULT,
