@@ -288,6 +288,12 @@
   const OMNIVORE_INITIAL_SEARCH_MULT = 2;
   /** Roam within this radius of spawn while not hunting. */
   const TERRITORY_RADIUS = 200;
+  /**
+   * Once past TERRITORY_RADIUS, keep walking home until inside this fraction.
+   * Without hysteresis, roam ↔ return flipped every frame on the boundary and
+   * looked like vibration (especially against tree lines).
+   */
+  const TERRITORY_RETURN_RATIO = 0.7;
   /** Flee desperation: cross water if predator within this distance. */
   const WATER_DESPERATION_FLEE_DIST = 100;
   /** Starvation desperation: cross water below this calorie ratio. */
@@ -296,6 +302,11 @@
   const WATER_STUCK_CROSS_SECONDS = 1.25;
   /** Seconds pinned against trees/mountains/water before forcing an escape step. */
   const OBSTACLE_STUCK_ESCAPE_SECONDS = 0.85;
+  /**
+   * Keep a cul-de-sac escape waypoint this long. Re-picking every time the next
+   * step was blocked flipped animals between opposite openings (in-place vibration).
+   */
+  const ESCAPE_GOAL_STICKY_SECONDS = 2.5;
   /** Minimum map fraction to travel when hunger-searching distant areas. */
   const HUNGER_EXPLORE_MIN_MAP_FRAC = 0.35;
   /**
@@ -397,6 +408,12 @@
       _waterStuckTimer: 0,
       /** Seconds spent fully blocked by trees / mountains / shoreline. */
       _obstacleStuckTimer: 0,
+      /** Sticky cul-de-sac exit waypoint (and how long to keep it). */
+      _escapeGoal: null,
+      _escapeGoalTimer: 0,
+      _escapeRefreshedForWater: false,
+      /** True while walking back inside territory after straying past the rim. */
+      _returningHome: false,
 
       groupId: opts.groupId != null ? opts.groupId : 0,
       maxGroupSize: def.maxGroupSize,
@@ -688,11 +705,23 @@
   /**
    * Scan nearby rings for a more open walkable pixel so animals can leave
    * tree / water cul-de-sacs instead of freezing on the edge.
+   *
+   * @param {object|null} preferNear When re-picking after a sticky timeout,
+   *   bias toward the previous escape heading so opposite openings do not win
+   *   on tiny position noise (that ping-pong reads as vibration).
    */
-  function findNearbyEscape(animal, ctx, maxRadiusTiles) {
+  function findNearbyEscape(animal, ctx, maxRadiusTiles, preferNear) {
     if (!ctx) return null;
     maxRadiusTiles = maxRadiusTiles == null ? 5 : maxRadiusTiles;
     const pinnedAtWater = isNearWater(animal, ctx);
+    let preferDx = 0;
+    let preferDy = 0;
+    let preferLen = 0;
+    if (preferNear) {
+      preferDx = preferNear.x - animal.x;
+      preferDy = preferNear.y - animal.y;
+      preferLen = Math.hypot(preferDx, preferDy);
+    }
     let fallback = null;
     let fallbackScore = -1;
     // Near → far so we prefer the cul-de-sac exit over open land behind trees.
@@ -735,6 +764,9 @@
         let score = open * 10 + r + (onWater ? 0 : 8);
         if (pinnedAtWater && !onWater && waterNeighbors === 0) score += 14;
         else if (pinnedAtWater && waterNeighbors > 0) score -= waterNeighbors * 4;
+        if (preferLen > 1) {
+          score += 16 * ((dx * preferDx + dy * preferDy) / (len * preferLen));
+        }
         if (score > bestScore) {
           bestScore = score;
           best = { x: x, y: y };
@@ -749,6 +781,12 @@
       }
     }
     return fallback;
+  }
+
+  function clearEscapeGoal(animal) {
+    animal._escapeGoal = null;
+    animal._escapeGoalTimer = 0;
+    animal._escapeRefreshedForWater = false;
   }
 
   /**
@@ -885,51 +923,55 @@
   }
 
   /**
-   * Escape waypoint that sticks across frames. Re-picking every frame let
-   * animals ping-pong between opposite open tiles (rapid in-place vibration).
+   * Escape waypoint that sticks across frames. Re-picking whenever the next
+   * step was blocked flipped animals between opposite openings every frame
+   * (rapid in-place vibration in tree corridors).
    *
    * When a temporary water crossing first becomes allowed, refresh once if the
    * sticky goal is still on the shoreline so animals can aim inland/across.
    */
   function getStickyEscape(animal, ctx, maxRadiusTiles) {
     const existing = animal._escapeGoal;
-    if (existing) {
+    const timer = animal._escapeGoalTimer || 0;
+    if (existing && timer > 0) {
       const dist = Math.hypot(existing.x - animal.x, existing.y - animal.y);
-      const refreshShoreOnce =
-        !animal._escapeRefreshedForWater &&
-        isNearWater(animal, ctx) &&
-        canCrossWater(animal, ctx) &&
-        pixelNearWater(ctx, existing.x, existing.y);
-      if (refreshShoreOnce) {
-        animal._escapeRefreshedForWater = true;
-        // fall through to re-pick an inland / crossable goal
-      } else if (
-        dist > TILE_SIZE * 0.35 &&
-        !isTerrainBlocked(animal, ctx, existing.x, existing.y)
-      ) {
-        const dx = existing.x - animal.x;
-        const dy = existing.y - animal.y;
-        const len = Math.hypot(dx, dy) || 1;
-        const stepX = animal.x + (dx / len) * Math.min(len, TILE_SIZE * 0.55);
-        const stepY = animal.y + (dy / len) * Math.min(len, TILE_SIZE * 0.55);
-        if (!isTerrainBlocked(animal, ctx, stepX, stepY)) {
+      if (dist <= TILE_SIZE * 0.4) {
+        // Arrived — allow a fresh farther exit if still pocket-stuck
+        clearEscapeGoal(animal);
+      } else {
+        const refreshShoreOnce =
+          !animal._escapeRefreshedForWater &&
+          isNearWater(animal, ctx) &&
+          canCrossWater(animal, ctx) &&
+          pixelNearWater(ctx, existing.x, existing.y);
+        if (refreshShoreOnce) {
+          animal._escapeRefreshedForWater = true;
+          // fall through to re-pick an inland / crossable goal
+        } else {
+          // Keep the goal even when the immediate step is solid — shore-slide
+          // / axis steps still make progress. Do not re-sample here.
           return existing;
         }
       }
     }
-    const esc = findNearbyEscape(animal, ctx, maxRadiusTiles);
+    const prev = existing;
+    const esc = findNearbyEscape(animal, ctx, maxRadiusTiles, prev);
     animal._escapeGoal = esc || null;
+    animal._escapeGoalTimer = esc ? ESCAPE_GOAL_STICKY_SECONDS : 0;
     return esc;
   }
 
   /**
-   * Shared unstick: slide, then walk toward the nearest more-open tile.
+   * Shared unstick: walk / slide toward a sticky escape (not the caller's
+   * momentary "away from velocity" point — that reversed every frame).
    * Returns true if the animal moved.
    */
   function tryUnstick(animal, tx, ty, dt, speedMult, ctx) {
-    if (tryShoreSlide(animal, tx, ty, dt, speedMult, ctx)) return true;
     const esc = getStickyEscape(animal, ctx, 6);
+    const goalX = esc ? esc.x : tx;
+    const goalY = esc ? esc.y : ty;
     if (esc && stepTowardEscape(animal, esc, dt, speedMult, ctx)) return true;
+    if (tryShoreSlide(animal, goalX, goalY, dt, speedMult, ctx)) return true;
     return false;
   }
 
@@ -943,6 +985,9 @@
    * does not authorize a swim) and freeze on the shoreline forever.
    */
   function updateLocalStuck(animal, dt, ctx) {
+    if ((animal._escapeGoalTimer || 0) > 0) {
+      animal._escapeGoalTimer = Math.max(0, animal._escapeGoalTimer - dt);
+    }
     if (!animal._stuckAnchor) {
       animal._stuckAnchor = { x: animal.x, y: animal.y };
       return;
@@ -1204,8 +1249,7 @@
       animal._slideVx = null;
       animal._slideVy = null;
       animal._avoidAng = null;
-      animal._escapeGoal = null;
-      animal._escapeRefreshedForWater = false;
+      clearEscapeGoal(animal);
     }
 
     // Splash particles when moving through water
@@ -1223,15 +1267,28 @@
       (animal._obstacleStuckTimer || 0) >= OBSTACLE_STUCK_ESCAPE_SECONDS
     ) {
       const esc = getStickyEscape(animal, ctx, 7);
-      if (esc && stepTowardEscape(animal, esc, dt, 0.85, ctx)) {
-        updateLocalStuck(animal, dt, ctx);
-        animal.stateTimer = 0.55 + rng.float() * 0.6;
-        return;
-      }
-      // Last resort nudge: hop toward the escape tile center when sliding fails.
-      // Once shoreline-pinned long enough, allow a longer water hop so tree+water
-      // pockets can be left instead of freezing on the edge.
       if (esc) {
+        // Path around tree corridors once pocket-stuck — direct steps alone
+        // thrash when the exit is not a straight line.
+        if ((animal._obstacleStuckTimer || 0) >= OBSTACLE_STUCK_ESCAPE_SECONDS * 1.4) {
+          moveToward(animal, esc.x, esc.y, dt, 0.85, ctx);
+          updateLocalStuck(animal, dt, ctx);
+          animal.stateTimer = 0.55 + rng.float() * 0.6;
+          return;
+        }
+        if (stepTowardEscape(animal, esc, dt, 0.85, ctx)) {
+          updateLocalStuck(animal, dt, ctx);
+          animal.stateTimer = 0.55 + rng.float() * 0.6;
+          return;
+        }
+        if (tryShoreSlide(animal, esc.x, esc.y, dt, 0.85, ctx)) {
+          updateLocalStuck(animal, dt, ctx);
+          animal.stateTimer = 0.55 + rng.float() * 0.6;
+          return;
+        }
+        // Last resort nudge: hop toward the escape tile when sliding fails.
+        // Once shoreline-pinned long enough, allow a longer water hop so tree+water
+        // pockets can be left instead of freezing on the edge.
         const dx = esc.x - animal.x;
         const dy = esc.y - animal.y;
         const len = Math.hypot(dx, dy) || 1;
@@ -1246,7 +1303,7 @@
           animal.vx = (dx / len) * effectiveSpeed(animal, 0.85);
           animal.vy = (dy / len) * effectiveSpeed(animal, 0.85);
           animal._stuckAnchor = { x: animal.x, y: animal.y };
-          animal._escapeGoal = null;
+          // Keep the sticky escape — clearing it here re-picked opposite exits.
           animal.stateTimer = 0.7 + rng.float() * 0.5;
           return;
         }
@@ -1427,8 +1484,7 @@
       animal._avoidAng = null;
       animal._slideVx = null;
       animal._slideVy = null;
-      animal._escapeGoal = null;
-      animal._escapeRefreshedForWater = false;
+      clearEscapeGoal(animal);
     } else if (Math.hypot(animal.vx, animal.vy) > 1) {
       animal._obstacleStuckTimer = (animal._obstacleStuckTimer || 0) + dt;
     }
@@ -1694,10 +1750,27 @@
     const dy = animal.y - animal.spawnY;
     const dist = Math.hypot(dx, dy);
     if (dist > TERRITORY_RADIUS) {
-      moveToward(animal, animal.spawnX, animal.spawnY, dt, 0.5, ctx);
-    } else {
-      wander(animal, dt, ctx.rng, ctx);
+      animal._returningHome = true;
     }
+    if (animal._returningHome) {
+      if (dist <= TERRITORY_RADIUS * TERRITORY_RETURN_RATIO) {
+        animal._returningHome = false;
+      } else {
+        // Drop cul-de-sac escapes that point away from home — they fought
+        // moveToward(spawn) on the territory rim and caused boundary vibration.
+        if (animal._escapeGoal) {
+          const esc = animal._escapeGoal;
+          const escAway =
+            (esc.x - animal.x) * (animal.spawnX - animal.x) +
+              (esc.y - animal.y) * (animal.spawnY - animal.y) <
+            0;
+          if (escAway) clearEscapeGoal(animal);
+        }
+        moveToward(animal, animal.spawnX, animal.spawnY, dt, 0.5, ctx);
+        return;
+      }
+    }
+    wander(animal, dt, ctx.rng, ctx);
   }
 
   /**
@@ -2434,6 +2507,7 @@
     OMNIVORE_HUNT_RATIO,
     PREDATOR_SATIATED_RATIO,
     TERRITORY_RADIUS,
+    TERRITORY_RETURN_RATIO,
     FLEE_ENTER_RANGE,
     FLEE_SAFE_RANGE,
     EAT_PREDATOR_INTERRUPT_RANGE,
@@ -2446,6 +2520,7 @@
     AQUATIC_WATER_SPEED_MULT,
     WATER_STUCK_CROSS_SECONDS,
     OBSTACLE_STUCK_ESCAPE_SECONDS,
+    ESCAPE_GOAL_STICKY_SECONDS,
     HUNGER_EXPLORE_GOAL_MIN,
     HUNGER_EXPLORE_GOAL_MAX,
     HUNGER_EXPLORE_MIN_MAP_FRAC,
