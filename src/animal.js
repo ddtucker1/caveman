@@ -32,9 +32,12 @@
   /** Default aquatic water pace (turtles); alligator overrides via waterSpeedMult. */
   const AQUATIC_WATER_SPEED_MULT = 2;
   const TILE_SIZE = 32;
-  /** Herbivores "see" plants within this many tiles (8 × 32 = 256px). */
-  const PLANT_SIGHT_TILES = 8;
+  /** Herbivores "see" plants within this many tiles (25 × 32 = 800px). */
+  const PLANT_SIGHT_TILES = 25;
   const PLANT_SIGHT_RANGE = PLANT_SIGHT_TILES * TILE_SIZE;
+  /** Omnivores detect food/prey within this many tiles while hunting (20 × 32 = 640px). */
+  const OMNIVORE_SIGHT_TILES = 20;
+  const OMNIVORE_SIGHT_RANGE = OMNIVORE_SIGHT_TILES * TILE_SIZE;
 
   // ---------------------------------------------------------------------------
   // Species definitions
@@ -264,8 +267,11 @@
    * actively targeting this animal (stubborn eating).
    */
   const EAT_PREDATOR_INTERRUPT_RANGE = 50;
-  /** Plant sight / food detect: 8 tiles = 256px. Prey detect uses the same base. */
-  const FOOD_DETECT_RANGE = PLANT_SIGHT_RANGE;
+  /**
+   * Default food/prey detect for pure predators: 8 tiles = 256px.
+   * Herbivores use PLANT_SIGHT_RANGE; omnivores use OMNIVORE_SIGHT_RANGE.
+   */
+  const FOOD_DETECT_RANGE = 8 * TILE_SIZE;
   /** Plant eating: 5 calories per second per animal (real-time in updateEating). Stacks. */
   const EAT_RATE_PER_SEC = 5;
   /** Predators burn 1 calorie every 10 seconds (flat rate for all predator species). */
@@ -284,8 +290,6 @@
   const PREDATOR_SATIATED_RATIO = 0.8;
   /** Omnivore prey search expands faster than herbivore plant search (tiles/sec). */
   const OMNIVORE_SEARCH_EXPAND_TILES_PER_SEC = 5;
-  /** Omnivores start hunger/hunt search at 2× base detect range. */
-  const OMNIVORE_INITIAL_SEARCH_MULT = 2;
   /** Roam within this radius of spawn while not hunting. */
   const TERRITORY_RADIUS = 200;
   /**
@@ -394,8 +398,13 @@
       _zzzSpawn: 0,
       /** True while in hunger-search (≤50% calories, orange eyes). */
       _hungerSearch: false,
-      /** Expanding plant detect radius while hunger-searching (herbivores). */
-      _searchRadius: PLANT_SIGHT_RANGE,
+      /** Expanding food detect radius while hunger-searching / hunting. */
+      _searchRadius:
+        def.diet === 'omnivore'
+          ? OMNIVORE_SIGHT_RANGE
+          : def.diet === 'herbivore'
+            ? PLANT_SIGHT_RANGE
+            : FOOD_DETECT_RANGE,
       /** Spiral-search state for predators in hunger-search. */
       _spiralAngle: 0,
       _spiralRadius: 0,
@@ -538,11 +547,14 @@
     return PREDATOR_HUNT_RATIO;
   }
 
-  function initialSearchRadius(animal) {
-    if (animal.diet === 'omnivore') {
-      return FOOD_DETECT_RANGE * OMNIVORE_INITIAL_SEARCH_MULT;
-    }
+  function baseFoodSightRange(animal) {
+    if (animal.diet === 'omnivore') return OMNIVORE_SIGHT_RANGE;
+    if (animal.diet === 'herbivore') return PLANT_SIGHT_RANGE;
     return FOOD_DETECT_RANGE;
+  }
+
+  function initialSearchRadius(animal) {
+    return baseFoodSightRange(animal);
   }
 
   /** Begin map-wide prey hunt (omnivores at ≤50%, predators at ≤30%). */
@@ -585,7 +597,7 @@
 
   function clearHungerSearch(animal) {
     animal._hungerSearch = false;
-    animal._searchRadius = FOOD_DETECT_RANGE;
+    animal._searchRadius = baseFoodSightRange(animal);
     animal._spiralAngle = 0;
     animal._spiralRadius = 0;
     animal._spiralOriginX = null;
@@ -2050,7 +2062,7 @@
     if (animal._hungerSearch || animal._hunting) {
       return animal._searchRadius || initialSearchRadius(animal);
     }
-    return FOOD_DETECT_RANGE;
+    return baseFoodSightRange(animal);
   }
 
   function findFoodTarget(animal, ctx) {
@@ -2514,6 +2526,8 @@
     FOOD_DETECT_RANGE,
     PLANT_SIGHT_RANGE,
     PLANT_SIGHT_TILES,
+    OMNIVORE_SIGHT_RANGE,
+    OMNIVORE_SIGHT_TILES,
     EAT_RANGE,
     EAT_RATE_PER_SEC,
     WATER_SPEED_MULT,
