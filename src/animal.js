@@ -255,6 +255,8 @@
   // Timing / thresholds
   /** 600s (10 min) reproduction cooldown at 0.5s/tick → 1200 ticks. */
   const BREED_COOLDOWN = 1200;
+  /** Omnivores wait twice as long between offspring (1200s / 20 min → 2400 ticks). */
+  const OMNIVORE_BREED_COOLDOWN = BREED_COOLDOWN * 2;
   /** Calories must be ≥ 80% of max to reproduce. */
   const BREED_CALORIE_RATIO = 0.8;
   /** Enter SEARCHING_FOR_FOOD at ≤50% calories. */
@@ -405,8 +407,8 @@
 
       /** Per-animal reproduction cooldown in ticks (persists with animal state). */
       breedingCooldown: isOffspring
-        ? BREED_COOLDOWN
-        : Math.floor(Math.random() * BREED_COOLDOWN),
+        ? breedCooldownFor(def.diet)
+        : Math.floor(Math.random() * breedCooldownFor(def.diet)),
       growth: 1,
       isAdult: true,
 
@@ -528,6 +530,11 @@
 
   function isPredator(a) {
     return a.diet === 'predator' || a.diet === 'omnivore';
+  }
+
+  /** Reproduction cooldown ticks for a diet (omnivores wait 2× longer). */
+  function breedCooldownFor(diet) {
+    return diet === 'omnivore' ? OMNIVORE_BREED_COOLDOWN : BREED_COOLDOWN;
   }
 
   /** Ready to reproduce asexually: calories ≥ 80%, cooldown expired. */
@@ -1627,7 +1634,7 @@
       isOffspring: true,
       groupId: parent.groupId,
     });
-    parent.breedingCooldown = BREED_COOLDOWN;
+    parent.breedingCooldown = breedCooldownFor(parent.diet);
     return [kid];
   }
 
@@ -2617,6 +2624,7 @@
     PREDATOR_SPECIES,
     ALL_SPECIES,
     BREED_COOLDOWN,
+    OMNIVORE_BREED_COOLDOWN,
     BREED_CALORIE_RATIO,
     HUNGER_SEEK_RATIO,
     HUNGER_RETURN_RATIO,
