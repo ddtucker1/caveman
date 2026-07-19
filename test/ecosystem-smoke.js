@@ -157,8 +157,21 @@ function assert(cond, msg) {
   assert(Wildborn.animal.OMNIVORE_SIGHT_TILES === 20, 'omnivore food hunt sight is 20 tiles');
   assert(Wildborn.animal.OMNIVORE_SIGHT_RANGE === 640, 'omnivore sight is 20 tiles (640px)');
   assert(Wildborn.animal.FOOD_DETECT_RANGE === 256, 'predator food detect stays 8 tiles (256px)');
-  assert(Wildborn.animal.WATER_SPEED_MULT === 0.5, 'water speed is 50% of normal');
-  assert(Wildborn.animal.AQUATIC_WATER_SPEED_MULT === 2, 'aquatic water speed is 2× land');
+  assert(Wildborn.animal.HERBIVORE_LAND_SPEED === 30, 'herbivore land speed is 30');
+  assert(Wildborn.animal.PREDATOR_LAND_SPEED === 36, 'predator land speed is 36');
+  assert(
+    Math.abs(Wildborn.animal.HERBIVORE_WATER_SPEED_MULT - 16 / 30) < 1e-9,
+    'herbivore water speed is 16/30 of land'
+  );
+  assert(
+    Math.abs(Wildborn.animal.PREDATOR_WATER_SPEED_MULT - 18 / 36) < 1e-9,
+    'predator water speed is 18/36 of land'
+  );
+  assert(
+    Math.abs(Wildborn.animal.AQUATIC_WATER_SPEED_MULT - 24 / 30) < 1e-9,
+    'default aquatic (turtle) water speed is 24/30 of land'
+  );
+  assert(Wildborn.animal.CORPSE_DECAY_TICKS === 120, 'corpses last 120 ticks (1 minute)');
 }
 
 // --- Unit: caveman hitbox (visual is 2×; collision stays 15) ---
@@ -173,14 +186,14 @@ function assert(cond, msg) {
   const rabbit = Wildborn.animal.createAnimal('rabbit', 0, 0);
   assert(rabbit.diet === 'herbivore' && rabbit.maxCalories === 60, 'rabbit herbivore stats');
   assert(rabbit.stamina == null && rabbit.maxStamina == null, 'animals have no stamina');
-  assert(rabbit.baseSpeed === Wildborn.animal.SPEED.medium, 'herbivores use medium land speed');
+  assert(rabbit.baseSpeed === Wildborn.animal.HERBIVORE_LAND_SPEED, 'herbivores use land speed 30');
   const wolf = Wildborn.animal.createAnimal('wolf', 0, 0);
   assert(wolf.diet === 'predator' && wolf.attackPower === 22, 'wolf predator stats');
   assert(wolf.defense === 'none', 'predators default to no flee defense');
   assert(wolf.special == null, 'animals have no special abilities');
   const bear = Wildborn.animal.createAnimal('bear', 0, 0);
   assert(bear.diet === 'omnivore', 'bear is omnivore');
-  assert(bear.baseSpeed === Wildborn.animal.SPEED.fast, 'omnivores use fast land speed');
+  assert(bear.baseSpeed === Wildborn.animal.PREDATOR_LAND_SPEED, 'omnivores use predator land speed 36');
   assert(bear.defense === 'none', 'omnivore predators also never flee by default');
   assert(Wildborn.animal.OMNIVORE_HUNT_RATIO === 0.5, 'omnivores hunt at 50% calories');
   assert(wolf.state === 'ROAM', 'predators spawn in ROAM state');
@@ -218,9 +231,9 @@ function assert(cond, msg) {
     'rabbit is not on the flat predator burn path'
   );
   const wolf = Wildborn.animal.createAnimal('wolf', 0, 0);
-  assert(Wildborn.animal.SPEED.fast === 52.5, 'fast speed halved to 52.5');
-  assert(Wildborn.animal.SPEED.very_slow === 14, 'very_slow speed halved to 14');
-  assert(wolf.baseSpeed === 52.5, 'wolf baseSpeed uses halved fast');
+  assert(Wildborn.animal.SPEED.predator === 36, 'predator SPEED alias is 36');
+  assert(Wildborn.animal.SPEED.herbivore === 30, 'herbivore SPEED alias is 30');
+  assert(wolf.baseSpeed === 36, 'wolf baseSpeed is predator land speed 36');
 }
 
 // --- Unit: real-time plant eating (5 cal/sec, stacks) ---
@@ -614,13 +627,21 @@ function assert(cond, msg) {
   for (let i = 0; i < herbIds.length; i++) {
     const a = Wildborn.animal.createAnimal(herbIds[i], 0, 0);
     assert(
-      a.baseSpeed === Wildborn.animal.SPEED.medium,
-      herbIds[i] + ' herbivore land speed is medium'
+      a.baseSpeed === Wildborn.animal.HERBIVORE_LAND_SPEED,
+      herbIds[i] + ' herbivore land speed is 30'
     );
     assert(a.stamina == null, herbIds[i] + ' has no stamina');
   }
+  const predIds = Object.keys(PREDATOR_SPECIES);
+  for (let i = 0; i < predIds.length; i++) {
+    const a = Wildborn.animal.createAnimal(predIds[i], 0, 0);
+    assert(
+      a.baseSpeed === Wildborn.animal.PREDATOR_LAND_SPEED,
+      predIds[i] + ' predator land speed is 36'
+    );
+  }
   const bear = Wildborn.animal.createAnimal('bear', 0, 0);
-  assert(bear.baseSpeed === Wildborn.animal.SPEED.fast, 'bear omnivore land speed is fast');
+  assert(bear.baseSpeed === Wildborn.animal.PREDATOR_LAND_SPEED, 'bear omnivore land speed is 36');
   assert(Wildborn.animal.STAMINA_MAX == null, 'stamina constants removed');
 }
 
@@ -717,19 +738,23 @@ function assert(cond, msg) {
   );
 }
 
-// --- Unit: turtles 2× in water; alligator 35 land / 75 water; others half ---
+// --- Unit: turtle 30/24; alligator 36/54; herbivore water 16; predator water 18 ---
 {
   const turtle = Wildborn.animal.createAnimal('turtle', 100, 100);
   const gator = Wildborn.animal.createAnimal('alligator', 100, 100);
   const deer = Wildborn.animal.createAnimal('deer', 100, 100);
   assert(turtle.aquatic === true, 'turtle is aquatic');
-  assert(turtle.waterSpeedMult === 2, 'turtle waterSpeedMult is 2×');
-  assert(gator.aquatic === true, 'alligator is aquatic');
-  assert(gator.speedKey === 'medium', 'alligator land speed key is medium (35)');
-  assert(gator.baseSpeed === 35, 'alligator land speed is 35');
+  assert(turtle.baseSpeed === 30, 'turtle land speed is 30');
   assert(
-    Math.abs(gator.waterSpeedMult - 75 / 35) < 1e-9,
-    'alligator waterSpeedMult targets 75 px/s'
+    Math.abs(turtle.waterSpeedMult - 24 / 30) < 1e-9,
+    'turtle waterSpeedMult targets 24 px/s'
+  );
+  assert(gator.aquatic === true, 'alligator is aquatic');
+  assert(gator.speedKey === 'predator', 'alligator land speed key is predator (36)');
+  assert(gator.baseSpeed === 36, 'alligator land speed is 36');
+  assert(
+    Math.abs(gator.waterSpeedMult - 54 / 36) < 1e-9,
+    'alligator waterSpeedMult targets 54 px/s'
   );
   assert(Wildborn.animal.canCrossWater(turtle, {}), 'turtle may cross water');
   assert(Wildborn.animal.canCrossWater(gator, {}), 'alligator may cross water');
@@ -768,8 +793,8 @@ function assert(cond, msg) {
   Wildborn.animal.updateAnimal(turtle, 0.2, waterCtx);
   const waterSpeed = Math.hypot(turtle.vx, turtle.vy);
   assert(
-    waterSpeed >= landSpeed * 1.9,
-    'turtle water speed ~2× land (' + waterSpeed.toFixed(1) + ' vs ' + landSpeed.toFixed(1) + ')'
+    waterSpeed >= landSpeed * (24 / 30) * 0.95,
+    'turtle water speed ~24 with land ~30 (' + waterSpeed.toFixed(1) + ' vs ' + landSpeed.toFixed(1) + ')'
   );
 
   gator.calories = gator.maxCalories * 0.25;
@@ -791,8 +816,8 @@ function assert(cond, msg) {
   Wildborn.animal.updateAnimal(gator, 0.2, waterCtx);
   const gatorWater = Math.hypot(gator.vx, gator.vy);
   assert(
-    gatorWater >= gatorLand * (75 / 35) * 0.95,
-    'alligator water speed ~75 with land ~35 (' +
+    gatorWater >= gatorLand * (54 / 36) * 0.95,
+    'alligator water speed ~54 with land ~36 (' +
       gatorWater.toFixed(1) +
       ' vs ' +
       gatorLand.toFixed(1) +
@@ -819,9 +844,26 @@ function assert(cond, msg) {
   deer._waterStuckTimer = Wildborn.animal.WATER_STUCK_CROSS_SECONDS;
   Wildborn.animal.updateAnimal(deer, 0.2, waterCtx);
   const deerWater = Math.hypot(deer.vx, deer.vy);
+  const herbWaterRatio = Wildborn.animal.HERBIVORE_WATER_SPEED_MULT;
   assert(
-    deerWater <= deerLand * 0.6 + 0.5 && deerWater >= deerLand * 0.4 - 0.5,
-    'non-aquatic water speed ~0.5× land (' + deerWater.toFixed(1) + ' vs ' + deerLand.toFixed(1) + ')'
+    deerWater <= deerLand * (herbWaterRatio + 0.1) + 0.5 &&
+      deerWater >= deerLand * (herbWaterRatio - 0.1) - 0.5,
+    'non-aquatic herbivore water speed ~16/30 land (' +
+      deerWater.toFixed(1) +
+      ' vs ' +
+      deerLand.toFixed(1) +
+      ')'
+  );
+}
+
+// --- Unit: corpse persists for 1 minute ---
+{
+  const rabbit = Wildborn.animal.createAnimal('rabbit', 0, 0);
+  Wildborn.animal.killAnimal(rabbit, null);
+  assert(rabbit.state === 'DEAD', 'killed animal is DEAD');
+  assert(
+    rabbit.corpseDecay === Wildborn.animal.CORPSE_DECAY_TICKS,
+    'corpseDecay starts at 120 ticks (1 minute)'
   );
 }
 
