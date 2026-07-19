@@ -155,6 +155,10 @@ function assert(cond, msg) {
     Wildborn.animal.HERBIVORE_CALORIE_BURN_MULT === 0.8,
     'herbivores burn calories at 80% rate (20% slower)'
   );
+  assert(
+    Wildborn.animal.OMNIVORE_CALORIE_BURN_MULT === 1.2,
+    'omnivores burn calories at 120% rate (20% faster)'
+  );
   assert(Wildborn.animal.EAT_RANGE === 20, 'eat range is 20px');
   assert(Wildborn.animal.PLANT_SIGHT_TILES === 25, 'herbivore plant sight is 25 tiles');
   assert(Wildborn.animal.PLANT_SIGHT_RANGE === 800, 'plant sight is 25 tiles (800px)');
@@ -218,18 +222,26 @@ function assert(cond, msg) {
   assert(!Wildborn.animal.AI_STATE.SEEK_MATE && !Wildborn.animal.AI_STATE.BREEDING, 'mate-seeking states removed');
 }
 
-// --- Unit: predator flat burn / herbivore ÷10 / speed halve ---
+// --- Unit: predator flat burn / omnivore ×1.2 / herbivore ÷10 ---
 {
   const tickSec = Wildborn.config.ecosystemTickSeconds || 0.5;
   const expectedPred = Wildborn.animal.PREDATOR_CALORIE_BURN_PER_SEC * tickSec;
+  const expectedOmni = expectedPred * Wildborn.animal.OMNIVORE_CALORIE_BURN_MULT;
   const predIds = Object.keys(PREDATOR_SPECIES);
   for (let i = 0; i < predIds.length; i++) {
     const a = Wildborn.animal.createAnimal(predIds[i], 0, 0);
     const burn = Wildborn.animal.calorieBurnPerTick(a);
-    assert(
-      Math.abs(burn - expectedPred) < 0.0001,
-      predIds[i] + ' burn is flat 0.1 cal/s (' + burn + ' /tick, expect ' + expectedPred + ')'
-    );
+    if (a.diet === 'omnivore') {
+      assert(
+        Math.abs(burn - expectedOmni) < 0.0001,
+        predIds[i] + ' omnivore burn is 20% faster (' + burn + ' /tick, expect ' + expectedOmni + ')'
+      );
+    } else {
+      assert(
+        Math.abs(burn - expectedPred) < 0.0001,
+        predIds[i] + ' burn is flat 0.1 cal/s (' + burn + ' /tick, expect ' + expectedPred + ')'
+      );
+    }
   }
   const rabbit = Wildborn.animal.createAnimal('rabbit', 0, 0);
   const herbBurn = Wildborn.animal.calorieBurnPerTick(rabbit);
@@ -243,6 +255,12 @@ function assert(cond, msg) {
   assert(
     !PREDATOR_SPECIES[rabbit.species],
     'rabbit is not on the flat predator burn path'
+  );
+  const bear = Wildborn.animal.createAnimal('bear', 0, 0);
+  const bearBurn = Wildborn.animal.calorieBurnPerTick(bear);
+  assert(
+    Math.abs(bearBurn - expectedOmni) < 0.0001,
+    'bear omnivore burn is 20% faster (' + bearBurn + ', expect ' + expectedOmni + ')'
   );
   const wolf = Wildborn.animal.createAnimal('wolf', 0, 0);
   assert(Wildborn.animal.SPEED.predator === 36, 'predator SPEED alias is 36');
