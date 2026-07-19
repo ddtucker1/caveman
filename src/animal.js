@@ -150,21 +150,6 @@
       size: 11,
       corpseYield: 1,
     },
-    lizard: {
-      id: 'lizard',
-      label: 'Lizard',
-      diet: 'herbivore',
-      maxGroupSize: 1,
-      speed: 'medium',
-      caloriesNeededPerDay: 20,
-      maxCalories: 40,
-      maxHealth: 25,
-      defense: 'flee',
-      attackPower: 3,
-      color: '#5a9a4a',
-      size: 7,
-      corpseYield: 1,
-    },
   };
 
   /** @type {Record<string, object>} */

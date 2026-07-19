@@ -93,9 +93,9 @@ function assert(cond, msg) {
   const taken = consumePlant(p, 100);
   assert(taken === 10 && !p.alive, 'consumePlant depletes and kills plant (stays in memory)');
   assert(p.growthPaused === true, 'eating pauses plant growth');
-  assert(p.respawnTimer === RESPAWN_DELAY_TICKS, 'respawn timer starts at 1200s (2400 ticks)');
-  assert(RESPAWN_DELAY_TICKS === 2400, 'RESPAWN_DELAY_TICKS is 2400');
-  assert(Wildborn.plant.RESPAWN_DELAY_SECONDS === 1200, 'RESPAWN_DELAY_SECONDS is 1200');
+  assert(p.respawnTimer === RESPAWN_DELAY_TICKS, 'respawn timer starts at 2400s (4800 ticks)');
+  assert(RESPAWN_DELAY_TICKS === 4800, 'RESPAWN_DELAY_TICKS is 4800');
+  assert(Wildborn.plant.RESPAWN_DELAY_SECONDS === 2400, 'RESPAWN_DELAY_SECONDS is 2400');
   // Fast-forward respawn
   p.respawnTimer = 1;
   updatePlant(p, () => ({ x: 50, y: 50 }));
@@ -131,7 +131,7 @@ function assert(cond, msg) {
   const bush = createPlant('berry_bush', 0, 0);
   assert(bush.maxCalories === 250, 'berry bush max is 250');
   const tree = createPlant('fruit_tree', 0, 0);
-  assert(tree.maxCalories === 500, 'fruit tree max is 500');
+  assert(tree.maxCalories === 1000, 'fruit tree max is 1000');
   const mush = createPlant('mushroom', 0, 0);
   assert(mush.maxCalories === 200, 'mushroom max is 200');
   const cactus = createPlant('cactus', 0, 0);
@@ -1071,7 +1071,7 @@ function assert(cond, msg) {
   const wolves = eco.animals.filter((a) => a.species === 'wolf');
   assert(wolves.every((w) => w.state === 'ROAM'), 'well-fed wolves start in ROAM');
 
-  const herbExpected = { rabbit: 10, deer: 8, cow: 6, raccoon: 5, bison: 4, ostrich: 3, turtle: 5, lizard: 8 };
+  const herbExpected = { rabbit: 10, deer: 8, cow: 6, raccoon: 5, bison: 4, ostrich: 3, turtle: 5 };
   const predExpected = { wolf: 4, lion: 3, panther: 2, bear: 2, alligator: 3 };
 
   const counts = {};

@@ -25,7 +25,6 @@
     bison: 4,
     ostrich: 3,
     turtle: 5,
-    lizard: 8,
   };
 
   const INITIAL_PREDATORS = {

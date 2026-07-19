@@ -231,8 +231,6 @@
 
     // Rabbit ear twitch encoded as slight vertical ear offset via opts
     opts._earTwitch = Math.sin(t * 6) > 0.92 ? -1.5 : 0;
-    // Lizard tongue
-    opts._tongueOut = Math.sin(t * 2.1 + idPhase) > 0.88;
     // Jaw chew (unless panting overrides)
     if (!opts.panting) {
       opts._jawOpen = state === 'EATING' ? 0.5 + 0.5 * Math.sin(t * 12) : opts.hunting ? 0.7 : 0.15;
@@ -459,7 +457,6 @@
     else if (type === 'bison') drawBison(ctx, def, sz, opts, lookX, lookY, headY);
     else if (type === 'ostrich') drawOstrich(ctx, def, sz, opts, lookX, lookY, headY);
     else if (type === 'turtle') drawTurtle(ctx, def, sz, opts, lookX, lookY, headY);
-    else if (type === 'lizard') drawLizard(ctx, def, sz, opts, lookX, lookY, headY);
   }
 
   function drawLegs(ctx, kind, sz, color) {
@@ -739,55 +736,6 @@
     ctx.ellipse(-sz * 0.45, headY + 1, sz * 0.08, sz * 0.05, 0, 0, Math.PI * 2);
     ctx.fill();
     drawEye(ctx, sz * 0.5, headY - 1, def.eyeColor, lookX, lookY);
-  }
-
-  function drawLizard(ctx, def, sz, opts, lookX, lookY, headY) {
-    // Legs
-    ctx.strokeStyle = def.bodyColor;
-    ctx.lineWidth = 1.3;
-    const ly = headY + sz * 0.1;
-    [[-sz * 0.15, -sz * 0.25], [sz * 0.1, sz * 0.2]].forEach(function (pair) {
-      ctx.beginPath();
-      ctx.moveTo(pair[0], ly);
-      ctx.lineTo(pair[0] - 2, ly + sz * 0.18);
-      ctx.moveTo(pair[1], ly);
-      ctx.lineTo(pair[1] + 2, ly + sz * 0.18);
-      ctx.stroke();
-    });
-    // Long tapering tail
-    ctx.fillStyle = def.bodyColor;
-    ctx.beginPath();
-    ctx.moveTo(-sz * 0.3, headY);
-    ctx.lineTo(-sz * 0.85, headY + sz * 0.08);
-    ctx.lineTo(-sz * 0.3, headY + sz * 0.12);
-    ctx.fill();
-    // Body
-    ctx.beginPath();
-    ctx.ellipse(0, headY, sz * 0.42, sz * 0.18, 0, 0, Math.PI * 2);
-    ctx.fill();
-    // Belly stripe
-    ctx.fillStyle = def.bellyColor;
-    ctx.beginPath();
-    ctx.ellipse(sz * 0.05, headY + 1, sz * 0.25, sz * 0.08, 0, 0, Math.PI * 2);
-    ctx.fill();
-    // Head
-    ctx.fillStyle = def.bodyColor;
-    ctx.beginPath();
-    ctx.ellipse(sz * 0.38, headY - 1, sz * 0.16, sz * 0.12, 0, 0, Math.PI * 2);
-    ctx.fill();
-    // Tongue flick
-    if (opts._tongueOut) {
-      ctx.strokeStyle = def.tongueColor;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(sz * 0.52, headY);
-      ctx.lineTo(sz * 0.72, headY + 1);
-      ctx.lineTo(sz * 0.78, headY - 1);
-      ctx.moveTo(sz * 0.72, headY + 1);
-      ctx.lineTo(sz * 0.78, headY + 3);
-      ctx.stroke();
-    }
-    drawEye(ctx, sz * 0.45, headY - 3, def.eyeColor, lookX, lookY);
   }
 
   // ---------------------------------------------------------------------------
