@@ -18,19 +18,30 @@
     DEAD: 'DEAD',
   };
 
-  /** Speed multipliers → pixels per second (halved for observability; min 0.5). */
+  /** Diet-class land speeds (px/s). Per-species speed keys are aliases only. */
+  const HERBIVORE_LAND_SPEED = 30;
+  const PREDATOR_LAND_SPEED = 36;
   const SPEED = {
-    very_slow: 14,
-    slow: 22.5,
-    medium: 35,
-    fast: 52.5,
-    very_fast: 72.5,
+    herbivore: HERBIVORE_LAND_SPEED,
+    predator: PREDATOR_LAND_SPEED,
+    /** Legacy aliases — land pace is diet-class, not tiered. */
+    very_slow: HERBIVORE_LAND_SPEED,
+    slow: HERBIVORE_LAND_SPEED,
+    medium: HERBIVORE_LAND_SPEED,
+    fast: PREDATOR_LAND_SPEED,
+    very_fast: PREDATOR_LAND_SPEED,
   };
   const MIN_SPEED = 0.5;
-  /** Non-aquatic animals on water move at 50% of normal speed. */
-  const WATER_SPEED_MULT = 0.5;
-  /** Default aquatic water pace (turtles); alligator overrides via waterSpeedMult. */
-  const AQUATIC_WATER_SPEED_MULT = 2;
+  /** Non-aquatic herbivores on water: 16 px/s (16/30 of land). */
+  const HERBIVORE_WATER_SPEED_MULT = 16 / HERBIVORE_LAND_SPEED;
+  /** Non-aquatic predators on water: 18 px/s (18/36 of land). */
+  const PREDATOR_WATER_SPEED_MULT = 18 / PREDATOR_LAND_SPEED;
+  /** @deprecated Prefer diet-specific water mults; kept as predator water alias. */
+  const WATER_SPEED_MULT = PREDATOR_WATER_SPEED_MULT;
+  /** Default aquatic water pace (turtles): 24 px/s (24/30 of land). */
+  const AQUATIC_WATER_SPEED_MULT = 24 / HERBIVORE_LAND_SPEED;
+  /** Corpse stays onscreen for 1 minute (120 ticks × 0.5s). */
+  const CORPSE_DECAY_TICKS = 120;
   const TILE_SIZE = 32;
   /** Herbivores "see" plants within this many tiles (25 × 32 = 800px). */
   const PLANT_SIGHT_TILES = 25;
@@ -143,6 +154,8 @@
       maxGroupSize: 1,
       speed: 'medium',
       aquatic: true,
+      /** 24 px/s in water with herbivore (30) land speed. */
+      waterSpeedMult: 24 / HERBIVORE_LAND_SPEED,
       caloriesNeededPerDay: 40,
       maxCalories: 80,
       maxHealth: 150,
@@ -162,7 +175,7 @@
       label: 'Wolf',
       diet: 'predator',
       maxGroupSize: 6,
-      speed: 'fast',
+      speed: 'predator',
       caloriesNeededPerDay: 100,
       maxCalories: 200,
       maxHealth: 90,
@@ -177,7 +190,7 @@
       label: 'Lion',
       diet: 'predator',
       maxGroupSize: 5,
-      speed: 'medium',
+      speed: 'predator',
       caloriesNeededPerDay: 150,
       maxCalories: 300,
       maxHealth: 140,
@@ -192,7 +205,7 @@
       label: 'Panther',
       diet: 'predator',
       maxGroupSize: 1,
-      speed: 'very_fast',
+      speed: 'predator',
       caloriesNeededPerDay: 90,
       maxCalories: 180,
       maxHealth: 100,
@@ -207,7 +220,7 @@
       label: 'Bear',
       diet: 'omnivore',
       maxGroupSize: 2,
-      speed: 'fast',
+      speed: 'predator',
       caloriesNeededPerDay: 250,
       maxCalories: 500,
       maxHealth: 220,
@@ -222,10 +235,10 @@
       label: 'Alligator',
       diet: 'predator',
       maxGroupSize: 1,
-      speed: 'medium',
+      speed: 'predator',
       aquatic: true,
-      /** 75 px/s in water with medium (35) land speed. */
-      waterSpeedMult: 75 / 35,
+      /** 54 px/s in water with predator (36) land speed. */
+      waterSpeedMult: 54 / PREDATOR_LAND_SPEED,
       caloriesNeededPerDay: 180,
       maxCalories: 360,
       maxHealth: 180,
@@ -353,8 +366,12 @@
     // Animals have no age — born as full-health adults.
     const startCal = maxCal * 0.85 + Math.random() * maxCal * 0.1;
 
-    const baseSpeed = Math.max(MIN_SPEED, SPEED[def.speed] || SPEED.medium);
     const isPred = def.diet === 'predator' || def.diet === 'omnivore';
+    // All predators/omnivores: 36 land; all herbivores: 30 land.
+    const baseSpeed = Math.max(
+      MIN_SPEED,
+      isPred ? PREDATOR_LAND_SPEED : HERBIVORE_LAND_SPEED
+    );
 
     return {
       kind: 'animal',
@@ -433,13 +450,15 @@
       /** Aquatic species cross water freely; waterSpeedMult controls swim vs land pace. */
       aquatic: !!(def.aquatic || def.waterSpeed),
       waterSpeedKey: def.waterSpeed || null,
-      /** Relative water speed (turtle default 2× land; alligator uses species override). */
+      /** Relative water speed (turtle 24/30; alligator 54/36; others diet-class). */
       waterSpeedMult:
         def.waterSpeedMult != null
           ? def.waterSpeedMult
           : def.aquatic || def.waterSpeed
             ? AQUATIC_WATER_SPEED_MULT
-            : 1,
+            : isPred
+              ? PREDATOR_WATER_SPEED_MULT
+              : HERBIVORE_WATER_SPEED_MULT,
       attackPower: def.attackPower || 5,
       // Predators never flee; herbivores default to fleeing when hit.
       defense: def.defense || (isPred ? 'none' : 'flee'),
@@ -625,18 +644,24 @@
     return AQUATIC_WATER_SPEED_MULT;
   }
 
+  /** Non-aquatic water pace: herbivores 16/30, predators 18/36. */
+  function nonAquaticWaterSpeedMult(animal) {
+    if (animal.diet === 'herbivore') return HERBIVORE_WATER_SPEED_MULT;
+    return PREDATOR_WATER_SPEED_MULT;
+  }
+
   function effectiveSpeed(animal, speedMult) {
     speedMult = speedMult == null ? 1 : speedMult;
     let speed = Math.max(MIN_SPEED, animal.baseSpeed * speedMult);
     if (animal._inWater) {
-      // Aquatic (alligator/turtle): 2× land pace; everyone else: half speed
+      // Aquatic (alligator/turtle): species waterSpeedMult; others: diet water mult
       if (animal.aquatic) {
         speed = Math.max(
           MIN_SPEED,
           animal.baseSpeed * aquaticWaterSpeedMult(animal) * speedMult
         );
       } else {
-        speed *= WATER_SPEED_MULT;
+        speed *= nonAquaticWaterSpeedMult(animal);
       }
     }
     return Math.max(MIN_SPEED, speed);
@@ -1328,7 +1353,7 @@
       if (animal._inWater) {
         speed = animal.aquatic
           ? Math.max(MIN_SPEED, animal.baseSpeed * aquaticWaterSpeedMult(animal) * 0.4)
-          : speed * WATER_SPEED_MULT;
+          : speed * nonAquaticWaterSpeedMult(animal);
       }
       // Fresh heading — drop sticky avoid angle from the last bounce
       animal._avoidAng = null;
@@ -1550,7 +1575,7 @@
     animal.vy = 0;
     // Dead bodies offer 100% of the animal's full calorie capacity to scavengers.
     animal.corpseCalories = animal.maxCalories * animal.corpseYield;
-    animal.corpseDecay = 80; // ticks until corpse vanishes
+    animal.corpseDecay = CORPSE_DECAY_TICKS; // 1 minute onscreen
     animal.deadAt = null; // render sets wall-clock time on first draw
     animal.target = null;
     if (killer && killer.alive) {
@@ -2504,6 +2529,11 @@
   Wildborn.animal = {
     AI_STATE,
     SPEED,
+    HERBIVORE_LAND_SPEED,
+    PREDATOR_LAND_SPEED,
+    HERBIVORE_WATER_SPEED_MULT,
+    PREDATOR_WATER_SPEED_MULT,
+    CORPSE_DECAY_TICKS,
     HERBIVORE_SPECIES,
     PREDATOR_SPECIES,
     ALL_SPECIES,
