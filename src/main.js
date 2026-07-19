@@ -655,7 +655,7 @@
       height: window.innerHeight,
     });
 
-    // Lock the playable world to the fixed 400×400 map (12800×12800 px)
+    // Lock the playable world to the fixed 400×400 map (25600×25600 px)
     if (game.world.ensureMapLoaded) {
       game.world.ensureMapLoaded();
     } else {

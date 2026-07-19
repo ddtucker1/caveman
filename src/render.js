@@ -35,109 +35,384 @@
         const wx = tx * TILE_SIZE;
         const wy = ty * TILE_SIZE;
         const screen = worldToScreen(camera, wx, wy);
-        drawTile(ctx, tile, screen.x, screen.y, tx, ty, time, terrain);
+        const neighbors = {
+          n: ty > 0 ? world.getTile(tx, ty - 1) : tile,
+          s: ty < mapTiles - 1 ? world.getTile(tx, ty + 1) : tile,
+          w: tx > 0 ? world.getTile(tx - 1, ty) : tile,
+          e: tx < mapTiles - 1 ? world.getTile(tx + 1, ty) : tile,
+          nw: tx > 0 && ty > 0 ? world.getTile(tx - 1, ty - 1) : tile,
+          ne: tx < mapTiles - 1 && ty > 0 ? world.getTile(tx + 1, ty - 1) : tile,
+          sw: tx > 0 && ty < mapTiles - 1 ? world.getTile(tx - 1, ty + 1) : tile,
+          se: tx < mapTiles - 1 && ty < mapTiles - 1 ? world.getTile(tx + 1, ty + 1) : tile,
+        };
+        drawTile(ctx, tile, screen.x, screen.y, tx, ty, time, terrain, neighbors);
       }
     }
   }
 
-  function drawTile(ctx, tile, sx, sy, tx, ty, time, terrain) {
-    // Base fill — grass uses light tan under-tint for texture readability
-    if (tile === TILE.GRASS || tile === TILE.DENSE_GRASS) {
-      ctx.fillStyle = terrain.grassBase;
+  /** Map tile id → base fill color used for blending. */
+  function tileBlendColor(tile, terrain) {
+    if (tile === TILE.GRASS) return terrain.grassTint || '#4a7a34';
+    if (tile === TILE.DENSE_GRASS) return terrain.denseGrassTint || '#3a6a28';
+    if (tile === TILE.WATER) return terrain.waterBase || TILE_COLORS[TILE.WATER];
+    if (tile === TILE.SAND) return terrain.sandColor || TILE_COLORS[TILE.SAND];
+    if (tile === TILE.TREE) return TILE_COLORS[TILE.TREE];
+    if (tile === TILE.CLIFF) return TILE_COLORS[TILE.CLIFF];
+    if (tile === TILE.PLANT) return TILE_COLORS[TILE.PLANT];
+    return TILE_COLORS[tile] != null ? TILE_COLORS[tile] : '#888';
+  }
+
+  function isSoftTerrain(tile) {
+    return (
+      tile === TILE.GRASS ||
+      tile === TILE.DENSE_GRASS ||
+      tile === TILE.PLANT ||
+      tile === TILE.SAND ||
+      tile === TILE.WATER
+    );
+  }
+
+  /** Soft edge strip toward a neighbor of a different type. */
+  function blendEdge(ctx, sx, sy, dir, neighborColor, strength) {
+    strength = strength == null ? 0.42 : strength;
+    const edge = Math.max(10, TILE_SIZE * 0.28);
+    let grad;
+    if (dir === 'n') {
+      grad = ctx.createLinearGradient(sx, sy, sx, sy + edge);
+    } else if (dir === 's') {
+      grad = ctx.createLinearGradient(sx, sy + TILE_SIZE, sx, sy + TILE_SIZE - edge);
+    } else if (dir === 'w') {
+      grad = ctx.createLinearGradient(sx, sy, sx + edge, sy);
+    } else {
+      grad = ctx.createLinearGradient(sx + TILE_SIZE, sy, sx + TILE_SIZE - edge, sy);
+    }
+    grad.addColorStop(0, neighborColor);
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = grad;
+    ctx.globalAlpha = strength;
+    ctx.fillRect(sx, sy, TILE_SIZE, TILE_SIZE);
+    ctx.globalAlpha = 1;
+  }
+
+  /** Soft corner smear for diagonal neighbor transitions. */
+  function blendCorner(ctx, sx, sy, corner, neighborColor) {
+    const r = Math.max(12, TILE_SIZE * 0.32);
+    let cx = sx;
+    let cy = sy;
+    if (corner === 'ne') {
+      cx = sx + TILE_SIZE;
+      cy = sy;
+    } else if (corner === 'sw') {
+      cx = sx;
+      cy = sy + TILE_SIZE;
+    } else if (corner === 'se') {
+      cx = sx + TILE_SIZE;
+      cy = sy + TILE_SIZE;
+    }
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    grad.addColorStop(0, neighborColor);
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = grad;
+    ctx.globalAlpha = 0.28;
+    ctx.fillRect(sx, sy, TILE_SIZE, TILE_SIZE);
+    ctx.globalAlpha = 1;
+  }
+
+  function drawTile(ctx, tile, sx, sy, tx, ty, time, terrain, neighbors) {
+    neighbors = neighbors || {};
+    const baseColor = tileBlendColor(tile, terrain);
+
+    // Ground underlay — warm soil for soft biomes, solid for rock/tree
+    if (tile === TILE.GRASS || tile === TILE.DENSE_GRASS || tile === TILE.PLANT) {
+      ctx.fillStyle = terrain.grassBase || '#b8a060';
       ctx.fillRect(sx, sy, TILE_SIZE, TILE_SIZE);
       ctx.fillStyle =
         tile === TILE.DENSE_GRASS
-          ? 'rgba(61,106,44,0.82)'
-          : 'rgba(74,122,52,0.78)';
+          ? 'rgba(58,106,40,0.84)'
+          : tile === TILE.PLANT
+            ? 'rgba(90,150,50,0.78)'
+            : 'rgba(74,122,52,0.80)';
       ctx.fillRect(sx, sy, TILE_SIZE, TILE_SIZE);
-      // Speckles
+    } else if (tile === TILE.WATER) {
+      const deep = terrain.waterDeep || '#1e4e78';
+      const shallow = terrain.waterBase || '#2a6a9a';
+      const nearShore =
+        neighbors.n === TILE.GRASS ||
+        neighbors.n === TILE.DENSE_GRASS ||
+        neighbors.n === TILE.SAND ||
+        neighbors.s === TILE.GRASS ||
+        neighbors.s === TILE.DENSE_GRASS ||
+        neighbors.s === TILE.SAND ||
+        neighbors.w === TILE.GRASS ||
+        neighbors.w === TILE.DENSE_GRASS ||
+        neighbors.w === TILE.SAND ||
+        neighbors.e === TILE.GRASS ||
+        neighbors.e === TILE.DENSE_GRASS ||
+        neighbors.e === TILE.SAND;
+      ctx.fillStyle = nearShore ? shallow : deep;
+      ctx.fillRect(sx, sy, TILE_SIZE, TILE_SIZE);
+    } else if (tile === TILE.SAND) {
+      ctx.fillStyle = terrain.sandColor || '#c8b888';
+      ctx.fillRect(sx, sy, TILE_SIZE, TILE_SIZE);
+    } else {
+      ctx.fillStyle = baseColor;
+      ctx.fillRect(sx, sy, TILE_SIZE, TILE_SIZE);
+    }
+
+    // Neighbor blending for soft terrain transitions
+    if (isSoftTerrain(tile)) {
+      const dirs = [
+        ['n', neighbors.n],
+        ['s', neighbors.s],
+        ['w', neighbors.w],
+        ['e', neighbors.e],
+      ];
+      for (let i = 0; i < dirs.length; i++) {
+        const nTile = dirs[i][1];
+        if (nTile == null || nTile === tile) continue;
+        if (!isSoftTerrain(nTile) && nTile !== TILE.TREE && nTile !== TILE.CLIFF) continue;
+        const nColor = tileBlendColor(nTile, terrain);
+        const strength =
+          (tile === TILE.WATER) !== (nTile === TILE.WATER) ? 0.55 : 0.38;
+        blendEdge(ctx, sx, sy, dirs[i][0], nColor, strength);
+      }
+      const corners = [
+        ['nw', neighbors.nw],
+        ['ne', neighbors.ne],
+        ['sw', neighbors.sw],
+        ['se', neighbors.se],
+      ];
+      for (let i = 0; i < corners.length; i++) {
+        const nTile = corners[i][1];
+        if (nTile == null || nTile === tile) continue;
+        if (!isSoftTerrain(nTile)) continue;
+        blendCorner(ctx, sx, sy, corners[i][0], tileBlendColor(nTile, terrain));
+      }
+    }
+
+    // Grass / dense grass detail
+    if (tile === TILE.GRASS || tile === TILE.DENSE_GRASS) {
       ctx.fillStyle = terrain.speckleColor;
-      const n = 5 + ((tx * 3 + ty) % 3);
+      const n = 10 + ((tx * 3 + ty) % 5);
       for (let i = 0; i < n; i++) {
         const h = hash2(tx * 17 + i, ty * 13 + i);
-        const px = sx + (h * 27) % (TILE_SIZE - 2);
-        const py = sy + (hash2(ty + i, tx + i) * 27) % (TILE_SIZE - 2);
-        ctx.fillRect(px, py, 1.5, 1.5);
+        const px = sx + 2 + (h * (TILE_SIZE - 6));
+        const py = sy + 2 + (hash2(ty + i, tx + i) * (TILE_SIZE - 6));
+        const s = 1.5 + (hash2(tx + i, ty) > 0.5 ? 1.2 : 0);
+        ctx.fillRect(px, py, s, s);
       }
-      // Decorative grass tufts (non-interactive)
-      if (hash2(tx, ty) > 0.72) {
+      // Decorative grass tufts
+      if (hash2(tx, ty) > 0.62) {
         ctx.strokeStyle = terrain.tuftColor;
-        ctx.lineWidth = 1.2;
-        const bx = sx + 8 + hash2(tx + 1, ty) * 14;
-        const by = sy + 22;
-        for (let i = 0; i < 3; i++) {
+        ctx.lineWidth = 1.6;
+        ctx.lineCap = 'round';
+        const bx = sx + TILE_SIZE * 0.22 + hash2(tx + 1, ty) * TILE_SIZE * 0.45;
+        const by = sy + TILE_SIZE * 0.72;
+        for (let i = 0; i < 4; i++) {
           ctx.beginPath();
-          ctx.moveTo(bx + i * 3, by);
-          ctx.lineTo(bx + i * 3 + (i - 1), by - 6 - i);
+          ctx.moveTo(bx + i * 4, by);
+          ctx.quadraticCurveTo(
+            bx + i * 4 + (i - 1.5),
+            by - TILE_SIZE * 0.12,
+            bx + i * 4 + (i - 1.5) * 1.4,
+            by - TILE_SIZE * 0.22 - i * 1.5
+          );
+          ctx.stroke();
+        }
+        if (terrain.tuftTip) {
+          ctx.strokeStyle = terrain.tuftTip;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(bx + 4, by - TILE_SIZE * 0.1);
+          ctx.lineTo(bx + 5, by - TILE_SIZE * 0.2);
           ctx.stroke();
         }
       }
       // Scattered rock formations
       if (hash2(tx + 9, ty + 4) > 0.93) {
-        drawRock(ctx, sx + 10, sy + 12, terrain, hash2(tx, ty + 3));
+        drawRock(
+          ctx,
+          sx + TILE_SIZE * 0.28,
+          sy + TILE_SIZE * 0.35,
+          terrain,
+          hash2(tx, ty + 3)
+        );
       }
-    } else {
-      ctx.fillStyle = TILE_COLORS[tile] != null ? TILE_COLORS[tile] : '#888';
-      ctx.fillRect(sx, sy, TILE_SIZE, TILE_SIZE);
+    }
+
+    if (tile === TILE.SAND) {
+      ctx.fillStyle = terrain.sandShade || 'rgba(140,110,60,0.2)';
+      const n = 8;
+      for (let i = 0; i < n; i++) {
+        const h = hash2(tx * 11 + i, ty * 19 + i);
+        ctx.fillRect(
+          sx + 3 + h * (TILE_SIZE - 8),
+          sy + 3 + hash2(ty + i, tx) * (TILE_SIZE - 8),
+          2.5,
+          1.5
+        );
+      }
     }
 
     if (tile === TILE.TREE) {
-      ctx.fillStyle = '#3a5a28';
+      const canopy = terrain.treeCanopy || '#3a6a28';
+      const canopyLight = terrain.treeCanopyLight || '#4e8a38';
+      const trunk = terrain.treeTrunk || '#5a3a1a';
+      // Soft ground moss under tree
+      ctx.fillStyle = 'rgba(50,90,30,0.35)';
       ctx.beginPath();
-      ctx.arc(sx + TILE_SIZE / 2, sy + 12, 10, 0, Math.PI * 2);
+      ctx.ellipse(
+        sx + TILE_SIZE / 2,
+        sy + TILE_SIZE * 0.78,
+        TILE_SIZE * 0.38,
+        TILE_SIZE * 0.14,
+        0,
+        0,
+        Math.PI * 2
+      );
       ctx.fill();
-      ctx.fillStyle = '#5a3a1a';
-      ctx.fillRect(sx + TILE_SIZE / 2 - 3, sy + TILE_SIZE - 10, 6, 8);
+      ctx.fillStyle = canopy;
+      ctx.beginPath();
+      ctx.arc(sx + TILE_SIZE * 0.38, sy + TILE_SIZE * 0.34, TILE_SIZE * 0.26, 0, Math.PI * 2);
+      ctx.arc(sx + TILE_SIZE * 0.62, sy + TILE_SIZE * 0.36, TILE_SIZE * 0.24, 0, Math.PI * 2);
+      ctx.arc(sx + TILE_SIZE * 0.5, sy + TILE_SIZE * 0.22, TILE_SIZE * 0.28, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = canopyLight;
+      ctx.beginPath();
+      ctx.arc(sx + TILE_SIZE * 0.55, sy + TILE_SIZE * 0.2, TILE_SIZE * 0.14, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = trunk;
+      ctx.fillRect(
+        sx + TILE_SIZE / 2 - TILE_SIZE * 0.07,
+        sy + TILE_SIZE * 0.55,
+        TILE_SIZE * 0.14,
+        TILE_SIZE * 0.32
+      );
+      ctx.fillStyle = 'rgba(255,220,160,0.12)';
+      ctx.fillRect(
+        sx + TILE_SIZE / 2 - TILE_SIZE * 0.02,
+        sy + TILE_SIZE * 0.55,
+        TILE_SIZE * 0.05,
+        TILE_SIZE * 0.32
+      );
     } else if (tile === TILE.PLANT) {
       ctx.strokeStyle = '#8fd050';
-      ctx.lineWidth = 1.5;
+      ctx.lineWidth = 2.2;
+      ctx.lineCap = 'round';
+      const baseY = sy + TILE_SIZE * 0.78;
       ctx.beginPath();
-      ctx.moveTo(sx + 12, sy + 24);
-      ctx.lineTo(sx + 11, sy + 12);
-      ctx.moveTo(sx + 16, sy + 24);
-      ctx.lineTo(sx + 18, sy + 14);
-      ctx.moveTo(sx + 20, sy + 24);
-      ctx.lineTo(sx + 21, sy + 16);
+      ctx.moveTo(sx + TILE_SIZE * 0.35, baseY);
+      ctx.quadraticCurveTo(
+        sx + TILE_SIZE * 0.32,
+        sy + TILE_SIZE * 0.45,
+        sx + TILE_SIZE * 0.3,
+        sy + TILE_SIZE * 0.28
+      );
+      ctx.moveTo(sx + TILE_SIZE * 0.5, baseY);
+      ctx.quadraticCurveTo(
+        sx + TILE_SIZE * 0.52,
+        sy + TILE_SIZE * 0.42,
+        sx + TILE_SIZE * 0.56,
+        sy + TILE_SIZE * 0.3
+      );
+      ctx.moveTo(sx + TILE_SIZE * 0.65, baseY);
+      ctx.quadraticCurveTo(
+        sx + TILE_SIZE * 0.66,
+        sy + TILE_SIZE * 0.48,
+        sx + TILE_SIZE * 0.7,
+        sy + TILE_SIZE * 0.36
+      );
       ctx.stroke();
     } else if (tile === TILE.WATER) {
-      // Animated wave frames (slow 2–3 frame cycle)
       const frame = Math.floor((time * 1.2) % 3);
       ctx.fillStyle = terrain.waterHighlight;
-      const yOff = frame * 3;
-      ctx.fillRect(sx + 4, sy + 8 + yOff, TILE_SIZE - 8, 3);
-      ctx.fillRect(sx + 8, sy + 16 + ((frame + 1) % 3) * 2, TILE_SIZE - 14, 2);
-      ctx.fillRect(sx + 6, sy + 22 + ((frame + 2) % 3), TILE_SIZE - 12, 2);
+      const yOff = frame * (TILE_SIZE * 0.06);
+      ctx.fillRect(
+        sx + TILE_SIZE * 0.1,
+        sy + TILE_SIZE * 0.22 + yOff,
+        TILE_SIZE * 0.8,
+        TILE_SIZE * 0.06
+      );
+      ctx.fillRect(
+        sx + TILE_SIZE * 0.18,
+        sy + TILE_SIZE * 0.45 + ((frame + 1) % 3) * (TILE_SIZE * 0.04),
+        TILE_SIZE * 0.6,
+        TILE_SIZE * 0.04
+      );
+      ctx.fillRect(
+        sx + TILE_SIZE * 0.14,
+        sy + TILE_SIZE * 0.68 + ((frame + 2) % 3) * (TILE_SIZE * 0.03),
+        TILE_SIZE * 0.7,
+        TILE_SIZE * 0.035
+      );
+      // Shore foam when adjacent to land
+      const shoreDirs = [
+        [neighbors.n, 0, 0, TILE_SIZE, TILE_SIZE * 0.18],
+        [neighbors.s, 0, TILE_SIZE * 0.82, TILE_SIZE, TILE_SIZE * 0.18],
+        [neighbors.w, 0, 0, TILE_SIZE * 0.18, TILE_SIZE],
+        [neighbors.e, TILE_SIZE * 0.82, 0, TILE_SIZE * 0.18, TILE_SIZE],
+      ];
+      ctx.fillStyle = 'rgba(220,240,255,0.18)';
+      for (let i = 0; i < shoreDirs.length; i++) {
+        const nTile = shoreDirs[i][0];
+        if (
+          nTile === TILE.GRASS ||
+          nTile === TILE.DENSE_GRASS ||
+          nTile === TILE.SAND ||
+          nTile === TILE.PLANT ||
+          nTile === TILE.TREE
+        ) {
+          ctx.fillRect(
+            sx + shoreDirs[i][1],
+            sy + shoreDirs[i][2],
+            shoreDirs[i][3],
+            shoreDirs[i][4]
+          );
+        }
+      }
     } else if (tile === TILE.CLIFF) {
-      ctx.fillStyle = '#8a8a80';
-      ctx.fillRect(sx + 2, sy + 2, TILE_SIZE - 4, 4);
-      ctx.fillStyle = '#4a4a44';
-      ctx.fillRect(sx + 2, sy + TILE_SIZE - 6, TILE_SIZE - 4, 4);
-      // Rock-like facets
-      ctx.fillStyle = 'rgba(0,0,0,0.15)';
+      ctx.fillStyle = terrain.cliffHighlight || '#9a9a90';
+      ctx.fillRect(sx + 4, sy + 4, TILE_SIZE - 8, TILE_SIZE * 0.12);
+      ctx.fillStyle = terrain.cliffShade || '#4a4a44';
+      ctx.fillRect(sx + 4, sy + TILE_SIZE - TILE_SIZE * 0.16, TILE_SIZE - 8, TILE_SIZE * 0.1);
+      ctx.fillStyle = 'rgba(0,0,0,0.16)';
       ctx.beginPath();
-      ctx.moveTo(sx + 4, sy + 10);
-      ctx.lineTo(sx + 14, sy + 8);
-      ctx.lineTo(sx + 18, sy + 20);
-      ctx.lineTo(sx + 6, sy + 22);
+      ctx.moveTo(sx + TILE_SIZE * 0.12, sy + TILE_SIZE * 0.28);
+      ctx.lineTo(sx + TILE_SIZE * 0.42, sy + TILE_SIZE * 0.22);
+      ctx.lineTo(sx + TILE_SIZE * 0.55, sy + TILE_SIZE * 0.58);
+      ctx.lineTo(sx + TILE_SIZE * 0.18, sy + TILE_SIZE * 0.62);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.08)';
+      ctx.beginPath();
+      ctx.moveTo(sx + TILE_SIZE * 0.5, sy + TILE_SIZE * 0.3);
+      ctx.lineTo(sx + TILE_SIZE * 0.78, sy + TILE_SIZE * 0.26);
+      ctx.lineTo(sx + TILE_SIZE * 0.72, sy + TILE_SIZE * 0.5);
       ctx.fill();
     }
   }
 
   function drawRock(ctx, x, y, terrain, seed) {
+    const s = TILE_SIZE / 32;
     ctx.fillStyle = terrain.rockColor;
     ctx.beginPath();
-    ctx.moveTo(x, y + 6);
-    ctx.lineTo(x + 3 + seed * 4, y);
-    ctx.lineTo(x + 10 + seed * 3, y + 2);
-    ctx.lineTo(x + 12, y + 8);
-    ctx.lineTo(x + 4, y + 10);
+    ctx.moveTo(x, y + 6 * s);
+    ctx.lineTo(x + (3 + seed * 4) * s, y);
+    ctx.lineTo(x + (10 + seed * 3) * s, y + 2 * s);
+    ctx.lineTo(x + 12 * s, y + 8 * s);
+    ctx.lineTo(x + 4 * s, y + 10 * s);
     ctx.closePath();
     ctx.fill();
     ctx.fillStyle = terrain.rockShade;
     ctx.beginPath();
-    ctx.moveTo(x + 4, y + 10);
-    ctx.lineTo(x + 12, y + 8);
-    ctx.lineTo(x + 8, y + 10);
+    ctx.moveTo(x + 4 * s, y + 10 * s);
+    ctx.lineTo(x + 12 * s, y + 8 * s);
+    ctx.lineTo(x + 8 * s, y + 10 * s);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    ctx.beginPath();
+    ctx.moveTo(x + 3 * s, y + 3 * s);
+    ctx.lineTo(x + 7 * s, y + 1 * s);
+    ctx.lineTo(x + 6 * s, y + 4 * s);
     ctx.fill();
   }
 
@@ -151,20 +426,20 @@
     const cy = screen.y + player.h / 2;
     /** Draw scale — twice the hitbox for a larger, more readable figure. */
     const PLAYER_VISUAL_SCALE = 2;
-    const s = player.w * PLAYER_VISUAL_SCALE; // 30 when hitbox is 15
+    const s = player.w * PLAYER_VISUAL_SCALE; // 60 when hitbox is 30
     const facing = player.facingX >= 0 ? 1 : -1;
     const phase = player.walkPhase || 0;
     const swing = Math.sin(phase) * 0.55;
-    const moving = Math.abs(player.vx) + Math.abs(player.vy) > 1;
+    const moving = Math.abs(player.vx) + Math.abs(player.vy) > 2;
 
     ctx.save();
     ctx.translate(cx, cy);
     ctx.scale(facing, 1);
 
     // Shadow under feet
-    ctx.fillStyle = 'rgba(0,0,0,0.18)';
+    ctx.fillStyle = 'rgba(0,0,0,0.22)';
     ctx.beginPath();
-    ctx.ellipse(0, s * 0.44, s * 0.34, s * 0.08, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, s * 0.44, s * 0.36, s * 0.09, 0, 0, Math.PI * 2);
     ctx.fill();
 
     // Legs (swing opposite to arms)
@@ -225,8 +500,12 @@
     ctx.lineTo(s * 0.14, s * 0.28);
     ctx.stroke();
 
-    // Torso — tan skin, wider shoulders, slight belly
-    ctx.fillStyle = '#c4a06a';
+    // Torso — tan skin with light shoulder highlight
+    const skinGrad = ctx.createLinearGradient(0, -s * 0.12, 0, s * 0.16);
+    skinGrad.addColorStop(0, '#d4b078');
+    skinGrad.addColorStop(0.55, '#c4a06a');
+    skinGrad.addColorStop(1, '#a88850');
+    ctx.fillStyle = skinGrad;
     ctx.beginPath();
     ctx.moveTo(-s * 0.24, -s * 0.10); // left shoulder
     ctx.lineTo(s * 0.24, -s * 0.10); // right shoulder
@@ -236,12 +515,17 @@
     ctx.fill();
 
     // Chest muscle hint
-    ctx.strokeStyle = 'rgba(150, 110, 70, 0.35)';
+    ctx.strokeStyle = 'rgba(150, 110, 70, 0.4)';
     ctx.lineWidth = s * 0.03;
     ctx.beginPath();
     ctx.moveTo(-s * 0.08, -s * 0.02);
     ctx.quadraticCurveTo(0, s * 0.04, s * 0.08, -s * 0.02);
     ctx.stroke();
+    // Belly shade
+    ctx.fillStyle = 'rgba(120, 80, 40, 0.12)';
+    ctx.beginPath();
+    ctx.ellipse(0, s * 0.08, s * 0.12, s * 0.06, 0, 0, Math.PI * 2);
+    ctx.fill();
 
     // Arms (opposite swing to legs)
     const armSwing = moving ? -swing : 0;
@@ -484,7 +768,7 @@
   }
 
   /** Visual multiplier — sprites draw larger than hitboxes for readability. */
-  const ENTITY_VISUAL_SCALE = 1.55;
+  const ENTITY_VISUAL_SCALE = 1.65;
 
   function drawPlantSprite(ctx, plant, camera, time) {
     const s = worldToScreen(camera, plant.x, plant.y);
@@ -518,12 +802,12 @@
     // Wider deadzone so tiny / oscillating vx near edges does not flip the
     // sprite every frame (reads as vibration instead of walking).
     const facingRight = animal.vx >= 0;
-    if (Math.abs(animal.vx) < 10 && animal._facingRight != null) {
+    if (Math.abs(animal.vx) < 20 && animal._facingRight != null) {
       // keep last
     } else if (
       animal._facingRight != null &&
       facingRight !== animal._facingRight &&
-      Math.abs(animal.vx) < 22
+      Math.abs(animal.vx) < 44
     ) {
       // keep last until lateral velocity is clearly committed
     } else {
@@ -532,8 +816,8 @@
     const face = animal._facingRight !== false;
 
     const speed = Math.hypot(animal.vx || 0, animal.vy || 0);
-    // Threshold lowered with global speed halve (was 8)
-    const moving = speed > 4;
+    // Threshold scaled with doubled movement speeds
+    const moving = speed > 8;
     const hunting =
       animal.alive &&
       animal.diet === 'predator' &&
@@ -751,7 +1035,7 @@
     const worldX = camera.x + screenX;
     const worldY = camera.y + screenY;
     let best = null;
-    let bestD = 28 * 28;
+    let bestD = 56 * 56;
 
     const plants = ecosystem.plants;
     for (let i = 0; i < plants.length; i++) {

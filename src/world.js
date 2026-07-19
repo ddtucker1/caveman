@@ -17,9 +17,9 @@
     SAND: 6,
   };
 
-  const TILE_SIZE = 32;
+  const TILE_SIZE = 64;
   const CHUNK_SIZE = 64; // 64x64 tiles per chunk
-  /** Fixed playable map: exactly 400×400 tiles → 12800×12800 pixels. */
+  /** Fixed playable map: exactly 400×400 tiles → 25600×25600 pixels. */
   const MAP_TILES = 400;
   const MAP_PIXEL_SIZE = MAP_TILES * TILE_SIZE;
 
@@ -134,6 +134,9 @@
           tile = TILE.CLIFF;
         } else if (river > 0.48 && river < 0.54 && elev < 0.55) {
           tile = TILE.WATER;
+        } else if (river > 0.455 && river < 0.565 && elev < 0.6) {
+          // Sandy shore bands for soft water↔land transitions
+          tile = TILE.SAND;
         } else if (moist > 0.55 && elev > 0.35 && elev < 0.65) {
           const local = valueNoise2D(wx * 0.5, wy * 0.5, seedNum + 333);
           tile = local > 0.55 ? TILE.TREE : TILE.DENSE_GRASS;

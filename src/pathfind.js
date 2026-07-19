@@ -22,7 +22,7 @@
     const maxNodes = opts.maxNodes || cfg.pathfindMaxNodes || 6000;
     const mapW = world.MAP_TILES || Wildborn.world.MAP_TILES || 400;
     const mapH = world.MAP_TILES || Wildborn.world.MAP_TILES || 400;
-    const TILE_SIZE = world.TILE_SIZE || Wildborn.world.TILE_SIZE || 32;
+    const TILE_SIZE = world.TILE_SIZE || Wildborn.world.TILE_SIZE || 64;
 
     startTx = clampInt(startTx, 0, mapW - 1);
     startTy = clampInt(startTy, 0, mapH - 1);
@@ -189,7 +189,7 @@
    * @returns {{x:number,y:number}[]|null}
    */
   function pathToPixel(world, fromX, fromY, toX, toY, opts) {
-    const TILE_SIZE = world.TILE_SIZE || 32;
+    const TILE_SIZE = world.TILE_SIZE || 64;
     const stx = Math.floor(fromX / TILE_SIZE);
     const sty = Math.floor(fromY / TILE_SIZE);
     const gtx = Math.floor(toX / TILE_SIZE);

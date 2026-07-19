@@ -8,7 +8,7 @@
 
   /** @typedef {'berry_bush'|'grass'|'mushroom'|'fruit_tree'|'cactus'} PlantSpecies */
 
-  /** Visual sizes are 2× the previous defaults (matched in shapes.json / shapes.js). */
+  /** Visual sizes are 4× the original defaults (matched in shapes.json / shapes.js). */
   const PLANT_SPECIES = {
     grass: {
       id: 'grass',
@@ -16,7 +16,7 @@
       maxCalories: 150,
       color: '#5aaa3a',
       accent: '#7cc84a',
-      size: 12,
+      size: 24,
     },
     berry_bush: {
       id: 'berry_bush',
@@ -24,7 +24,7 @@
       maxCalories: 250,
       color: '#3a8a2a',
       accent: '#c44',
-      size: 20,
+      size: 40,
     },
     mushroom: {
       id: 'mushroom',
@@ -32,7 +32,7 @@
       maxCalories: 200,
       color: '#8a5a3a',
       accent: '#c08050',
-      size: 14,
+      size: 28,
     },
     fruit_tree: {
       id: 'fruit_tree',
@@ -40,7 +40,7 @@
       maxCalories: 2000,
       color: '#2a6a1e',
       accent: '#e06040',
-      size: 28,
+      size: 56,
     },
     cactus: {
       id: 'cactus',
@@ -48,7 +48,7 @@
       maxCalories: 175,
       color: '#4a8a4a',
       accent: '#6ab06a',
-      size: 18,
+      size: 36,
     },
   };
 

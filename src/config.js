@@ -12,23 +12,23 @@
     /** Seconds of real time per discrete ecosystem tick (hunger, growth, reproduction). */
     ecosystemTickSeconds: 0.5,
 
-    /** Fixed playable map size in tiles (400×400 → 12800×12800 px at 32px tiles). */
+    /** Fixed playable map size in tiles (400×400 → 25600×25600 px at 64px tiles). */
     mapTiles: 400,
 
     /**
      * Legacy half-extent used as a soft animal roam pad.
      * Entities are hard-clamped to the fixed map; this is map half-width.
      */
-    ecosystemSpawnRadius: 200 * 32,
+    ecosystemSpawnRadius: 200 * 64,
 
     /** Spatial hash cell size in world pixels (tuned for ~150 plants / ~100 animals). */
-    spatialCellSize: 64,
+    spatialCellSize: 128,
 
     /**
      * Full AI + pathfinding within this distance (px) of the player focus.
      * Farther animals use cheap velocity integration most frames.
      */
-    simLodNearPx: 1400,
+    simLodNearPx: 2800,
 
     /** Far animals run a full AI update every N frames (1 = always). */
     simLodFarEveryN: 4,

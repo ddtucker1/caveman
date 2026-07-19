@@ -82,7 +82,7 @@ Entities use **data-driven geometric silhouettes** (`src/shapes.json` /
 
 In `src/config.js`:
 
-- `mapTiles` — fixed playable map size (default `400` → 12800×12800 px)
+- `mapTiles` — fixed playable map size (default `400` → 25600×25600 px at 64px tiles)
 - `ecosystemEnabled` — master toggle (default `true`)
 - `ecosystemTickSeconds` — discrete hunger/growth tick rate
 - `simLodNearPx` / `simLodFarEveryN` — simulation LOD around the player
