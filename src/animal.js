@@ -265,6 +265,8 @@
   const DAY_TICKS = 120;
   /** Global calorie burn scale — animals previously burned ~10× too fast. */
   const CALORIE_BURN_DIVISOR = 10;
+  /** Herbivores burn calories 20% slower than the scaled daily-need rate. */
+  const HERBIVORE_CALORIE_BURN_MULT = 0.8;
   /** Minimum calories burned per ecosystem tick. */
   const MIN_CALORIE_BURN = 0.5;
   /** Animals must be within 20px of a plant to eat it. */
@@ -489,7 +491,8 @@
    * Per-tick calorie drain.
    * Predators (wolf/lion/panther/bear/alligator): flat 0.1 cal/sec
    *   → PREDATOR_CALORIE_BURN_PER_SEC × ecosystemTickSeconds per tick.
-   * Herbivores: (daily need / DAY_TICKS) / 10, rounded to 1 decimal.
+   * Herbivores: (daily need / DAY_TICKS) / 10, rounded to 1 decimal,
+   *   then × HERBIVORE_CALORIE_BURN_MULT (20% slower).
    * Floor at MIN_CALORIE_BURN (0.5). Species whose scaled rate is below the floor
    * keep a 2-decimal scaled value so small animals are not forced to burn faster.
    */
@@ -502,9 +505,12 @@
     }
     const raw = animal.caloriesNeededPerDay / DAY_TICKS / CALORIE_BURN_DIVISOR;
     const rounded = Math.round(raw * 10) / 10;
-    if (rounded >= MIN_CALORIE_BURN) return rounded;
-    // Preserve relative differences for sub-0.5 scaled rates (still ~10× slower)
-    return Math.max(0.1, Math.round(raw * 100) / 100);
+    const scaled =
+      rounded >= MIN_CALORIE_BURN
+        ? rounded
+        : // Preserve relative differences for sub-0.5 scaled rates (still ~10× slower)
+          Math.max(0.1, Math.round(raw * 100) / 100);
+    return scaled * HERBIVORE_CALORIE_BURN_MULT;
   }
 
   // ---------------------------------------------------------------------------
@@ -2502,7 +2508,7 @@
       return result;
     }
 
-    // Hunger drain: predators flat 0.1 cal/s; herbivores daily need / DAY_TICKS ÷10
+    // Hunger drain: predators flat 0.1 cal/s; herbivores daily need / DAY_TICKS ÷10 × 0.8
     // Sleeping: conservation mode — half burn
     let drain = calorieBurnPerTick(animal);
     if (animal.state === AI_STATE.SLEEP) drain *= 0.5;
@@ -2611,6 +2617,7 @@
     HUNGER_RETURN_RATIO,
     DAY_TICKS,
     CALORIE_BURN_DIVISOR,
+    HERBIVORE_CALORIE_BURN_MULT,
     MIN_CALORIE_BURN,
     PREDATOR_CALORIE_BURN_PER_SEC,
     PREDATOR_HUNT_RATIO,
