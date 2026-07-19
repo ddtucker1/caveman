@@ -295,7 +295,7 @@
   const FOOD_DETECT_RANGE = 8 * TILE_SIZE;
   /** Plant eating: 5 calories per second per animal (real-time in updateEating). Stacks. */
   const EAT_RATE_PER_SEC = 5;
-  /** Predators burn 1 calorie every 10 seconds (flat rate for all predator species). */
+  /** Base predator burn: 1 calorie every 10 seconds (scaled by diet multipliers). */
   const PREDATOR_CALORIE_BURN_PER_SEC = 0.1;
   /** Corpse transfer rate (calories per ecosystem tick). */
   const EAT_RATE = 6;
