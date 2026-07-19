@@ -31,8 +31,8 @@
     alligator: 3,
   };
 
-  /** Exactly 150 plants scattered across the 400×400 map. */
-  const INITIAL_PLANT_COUNT = 150;
+  /** Exactly 100 plants scattered across the 400×400 map. */
+  const INITIAL_PLANT_COUNT = 100;
 
   /** After a species hits zero living animals, wait 25 min then spawn this many. */
   const EXTINCTION_REPOPULATE_COUNT = 4;
