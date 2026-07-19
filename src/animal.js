@@ -300,6 +300,12 @@
   const PREDATOR_HUNT_RATIO = 0.3;
   /** Omnivores skip the 30% hunt gate — actively hunt prey at ≤50% calories. */
   const OMNIVORE_HUNT_RATIO = 0.5;
+  /** Omnivores attack other omnivore species for food at ≤25% calories. */
+  const OMNIVORE_ATTACK_OTHER_SPECIES_RATIO = 0.25;
+  /** Omnivores attack their own species for food at ≤10% calories. */
+  const OMNIVORE_ATTACK_OWN_SPECIES_RATIO = 0.1;
+  /** Pure predators attack other predators when critically starved. */
+  const PREDATOR_RIVAL_HUNT_RATIO = 0.15;
   const PREDATOR_SATIATED_RATIO = 0.8;
   /** Omnivore prey search expands faster than herbivore plant search (tiles/sec). */
   const OMNIVORE_SEARCH_EXPAND_TILES_PER_SEC = 5;
@@ -558,6 +564,22 @@
 
   function isHungry(a) {
     return hungerRatio(a) <= HUNGER_SEEK_RATIO;
+  }
+
+  /**
+   * Starving omnivores turn on other omnivores for food:
+   * ≤25% → other omnivore species; ≤10% → own species as well.
+   */
+  function canAttackOmnivoreRival(attacker, target) {
+    if (!attacker || !target) return false;
+    if (attacker.diet !== 'omnivore' || target.diet !== 'omnivore') return false;
+    if (!target.alive || target.id === attacker.id) return false;
+    const ratio = hungerRatio(attacker);
+    if (ratio <= OMNIVORE_ATTACK_OWN_SPECIES_RATIO) return true;
+    if (ratio <= OMNIVORE_ATTACK_OTHER_SPECIES_RATIO) {
+      return target.species !== attacker.species;
+    }
+    return false;
   }
 
   /** Calories ratio at which an animal enters active prey hunting. */
@@ -2075,8 +2097,17 @@
       if (!t.alive) return false;
       // Live prey
       if (isPredator(animal) && t.diet === 'herbivore') return true;
-      // Desperate predators fight other predators
-      if (isPredator(animal) && isPredator(t) && isHungry(animal) && t.id !== animal.id) return true;
+      // Starving omnivores attack other omnivores (25% other species / 10% own)
+      if (canAttackOmnivoreRival(animal, t)) return true;
+      // Desperate pure predators fight other predators / omnivores
+      if (
+        animal.diet === 'predator' &&
+        isPredator(t) &&
+        isHungry(animal) &&
+        t.id !== animal.id
+      ) {
+        return true;
+      }
       return false;
     }
     return false;
@@ -2123,8 +2154,45 @@
       );
       if (prey) return prey;
 
-      // Desperate: other predators (only when critically starved)
-      if (hungerRatio(animal) < 0.15) {
+      // Omnivores: turn on other omnivores when calories get critically low.
+      // ≤25% → other omnivore species; ≤10% → own species too.
+      if (animal.diet === 'omnivore') {
+        const ratio = hungerRatio(animal);
+        const rivalRange = detect * 0.45;
+        if (ratio <= OMNIVORE_ATTACK_OTHER_SPECIES_RATIO) {
+          const otherOmnivore = ctx.findNearestAnimal(
+            animal.x,
+            animal.y,
+            rivalRange,
+            function (o) {
+              return (
+                o.alive &&
+                o.diet === 'omnivore' &&
+                o.species !== animal.species &&
+                o.id !== animal.id
+              );
+            }
+          );
+          if (otherOmnivore) return otherOmnivore;
+        }
+        if (ratio <= OMNIVORE_ATTACK_OWN_SPECIES_RATIO) {
+          const ownSpecies = ctx.findNearestAnimal(
+            animal.x,
+            animal.y,
+            rivalRange,
+            function (o) {
+              return (
+                o.alive &&
+                o.diet === 'omnivore' &&
+                o.species === animal.species &&
+                o.id !== animal.id
+              );
+            }
+          );
+          if (ownSpecies) return ownSpecies;
+        }
+      } else if (animal.diet === 'predator' && hungerRatio(animal) < PREDATOR_RIVAL_HUNT_RATIO) {
+        // Desperate pure predators: attack other predators / omnivores
         const rival = ctx.findNearestAnimal(
           animal.x,
           animal.y,
@@ -2547,6 +2615,9 @@
     PREDATOR_CALORIE_BURN_PER_SEC,
     PREDATOR_HUNT_RATIO,
     OMNIVORE_HUNT_RATIO,
+    OMNIVORE_ATTACK_OTHER_SPECIES_RATIO,
+    OMNIVORE_ATTACK_OWN_SPECIES_RATIO,
+    PREDATOR_RIVAL_HUNT_RATIO,
     PREDATOR_SATIATED_RATIO,
     TERRITORY_RADIUS,
     TERRITORY_RETURN_RATIO,
