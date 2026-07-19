@@ -826,6 +826,15 @@ function assert(cond, msg) {
     Wildborn.animal.canCrossWater(deer, {}),
     'hunger-searching animal stuck at water may cross after timeout'
   );
+  // Idle / roam animals must also unstick — otherwise they freeze in coves forever
+  const idleDeer = Wildborn.animal.createAnimal('deer', 100, 100);
+  idleDeer.state = 'IDLE';
+  idleDeer._hungerSearch = false;
+  idleDeer._waterStuckTimer = Wildborn.animal.WATER_STUCK_CROSS_SECONDS;
+  assert(
+    Wildborn.animal.canCrossWater(idleDeer, {}),
+    'idle animal stuck at water may cross after timeout'
+  );
   // Starvation no longer requires a locked target
   const rabbit = Wildborn.animal.createAnimal('rabbit', 100, 100);
   rabbit.calories = rabbit.maxCalories * 0.1;
@@ -833,6 +842,142 @@ function assert(cond, msg) {
   assert(
     Wildborn.animal.canCrossWater(rabbit, {}),
     'starving animal may cross water without a food target'
+  );
+}
+
+// --- Unit: animals escape water / tree cul-de-sacs instead of freezing ---
+{
+  const world = createWorld('edge-unstuck-test');
+  world.ensureMapLoaded();
+
+  function makeEdgeCtx(seed) {
+    return {
+      rng: createRng(seed),
+      tickSeconds: 0.5,
+      world,
+      mapPixelSize: MAP_PIXEL_SIZE,
+      pathBudget: 200,
+      isWater: (x, y) => world.isSlow(world.getTileAtPixel(x, y)),
+      isSolid: (x, y) => world.isSolid(world.getTileAtPixel(x, y)),
+      findNearestPlant: () => null,
+      findNearestAnimal: () => null,
+      queryAnimals: () => [],
+      spawnSplash: () => {},
+      spawnPoop: () => {},
+    };
+  }
+
+  // Land tiles with ≤1 land neighbor (dead-ends against water and/or trees)
+  const traps = [];
+  for (let ty = 2; ty < MAP_TILES - 2 && traps.length < 36; ty++) {
+    for (let tx = 2; tx < MAP_TILES - 2 && traps.length < 36; tx++) {
+      if (!world.isLand(world.getTile(tx, ty))) continue;
+      let landN = 0;
+      let blockN = 0;
+      const dirs = [
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1],
+      ];
+      for (let i = 0; i < dirs.length; i++) {
+        const t = world.getTile(tx + dirs[i][0], ty + dirs[i][1]);
+        if (world.isLand(t)) landN++;
+        else if (world.isSlow(t) || world.isSolid(t)) blockN++;
+      }
+      if (landN <= 1 && blockN >= 3) {
+        traps.push({
+          tx,
+          ty,
+          x: tx * TILE_SIZE + TILE_SIZE / 2,
+          y: ty * TILE_SIZE + TILE_SIZE / 2,
+        });
+      }
+    }
+  }
+  assert(traps.length >= 8, 'found cul-de-sac tiles for unstuck test (' + traps.length + ')');
+
+  let escaped = 0;
+  let stuck = 0;
+  let enteredSolid = 0;
+  for (let i = 0; i < traps.length; i++) {
+    const spot = traps[i];
+    const deer = Wildborn.animal.createAnimal('deer', spot.x, spot.y);
+    deer.state = 'IDLE';
+    deer.calories = deer.maxCalories * 0.8;
+    const ctx = makeEdgeCtx('unstuck-' + i);
+    const start = { x: deer.x, y: deer.y };
+    for (let f = 0; f < 220; f++) {
+      Wildborn.animal.updateAnimal(deer, 0.1, ctx);
+      Wildborn.animal.clampToMap(deer, MAP_PIXEL_SIZE);
+      if (world.isSolid(world.getTileAtPixel(deer.x, deer.y))) enteredSolid++;
+    }
+    const moved = Math.hypot(deer.x - start.x, deer.y - start.y);
+    if (moved >= 28) escaped++;
+    else stuck++;
+  }
+  assert(enteredSolid === 0, 'unstuck recovery never walks into trees/mountains');
+  assert(
+    escaped >= Math.ceil(traps.length * 0.7),
+    'most idle animals escape water/tree cul-de-sacs (' +
+      escaped +
+      '/' +
+      traps.length +
+      ', stuck ' +
+      stuck +
+      ')'
+  );
+
+  // Water-edge roamers must also leave shoreline pins
+  const waterEdges = [];
+  for (let ty = 2; ty < MAP_TILES - 2 && waterEdges.length < 20; ty++) {
+    for (let tx = 2; tx < MAP_TILES - 2 && waterEdges.length < 20; tx++) {
+      if (!world.isLand(world.getTile(tx, ty))) continue;
+      let waterN = 0;
+      let landN = 0;
+      const dirs = [
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1],
+      ];
+      for (let i = 0; i < dirs.length; i++) {
+        const t = world.getTile(tx + dirs[i][0], ty + dirs[i][1]);
+        if (world.isSlow(t)) waterN++;
+        else if (world.isLand(t)) landN++;
+      }
+      if (waterN >= 2 && landN <= 1) {
+        waterEdges.push({
+          x: tx * TILE_SIZE + TILE_SIZE / 2,
+          y: ty * TILE_SIZE + TILE_SIZE / 2,
+        });
+      }
+    }
+  }
+  assert(waterEdges.length >= 5, 'found water-edge traps for roam unstuck test');
+  let roamEscaped = 0;
+  for (let i = 0; i < waterEdges.length; i++) {
+    const spot = waterEdges[i];
+    const wolf = Wildborn.animal.createAnimal('wolf', spot.x, spot.y);
+    wolf.state = 'ROAM';
+    wolf.calories = wolf.maxCalories * 0.7;
+    wolf.spawnX = spot.x;
+    wolf.spawnY = spot.y;
+    const ctx = makeEdgeCtx('roam-water-' + i);
+    const start = { x: wolf.x, y: wolf.y };
+    for (let f = 0; f < 250; f++) {
+      Wildborn.animal.updateAnimal(wolf, 0.1, ctx);
+      Wildborn.animal.clampToMap(wolf, MAP_PIXEL_SIZE);
+    }
+    if (Math.hypot(wolf.x - start.x, wolf.y - start.y) >= 28) roamEscaped++;
+  }
+  assert(
+    roamEscaped >= Math.ceil(waterEdges.length * 0.65),
+    'most roaming predators escape water-edge pins (' +
+      roamEscaped +
+      '/' +
+      waterEdges.length +
+      ')'
   );
 }
 
