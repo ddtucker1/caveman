@@ -471,7 +471,16 @@
         [step * 0.7, -step * 0.7],
         [-step * 0.7, -step * 0.7],
       ];
+      // Prefer the last successful escape heading so far-LOD movers do not
+      // ping-pong between opposite open steps each frame.
+      const order = [];
+      const prefer = animal._cheapUnstickDir;
+      if (prefer != null && prefer >= 0 && prefer < dirs.length) order.push(prefer);
       for (let i = 0; i < dirs.length; i++) {
+        if (i !== prefer) order.push(i);
+      }
+      for (let o = 0; o < order.length; o++) {
+        const i = order[o];
         const nx = animal.x + dirs[i][0];
         const ny = animal.y + dirs[i][1];
         if (world.isSolid(world.getTileAtPixel(nx, ny))) continue;
@@ -480,6 +489,7 @@
         animal.y = ny;
         animal.vx = (dirs[i][0] / step) * speed * 0.5;
         animal.vy = (dirs[i][1] / step) * speed * 0.5;
+        animal._cheapUnstickDir = i;
         animal._path = null;
         animal._pathIndex = 0;
         return;

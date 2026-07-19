@@ -512,7 +512,7 @@
     );
   }
 
-  /** Tiny sprout icon while a depleted plant waits 3072s to respawn elsewhere. */
+  /** Tiny sprout icon while a depleted plant waits 2765s to respawn elsewhere. */
   function drawPlantSprout(ctx, plant, camera) {
     const s = worldToScreen(camera, plant.x, plant.y);
     const progress = Math.max(0, Math.min(1, plant.sproutProgress || 0));
@@ -547,10 +547,17 @@
     const base = shapeDef ? shapeDef.size : animal.baseSize || animal.size;
     const scale = (animal.size / base) * ENTITY_VISUAL_SCALE;
 
+    // Wider deadzone so tiny / oscillating vx near edges does not flip the
+    // sprite every frame (reads as vibration instead of walking).
     const facingRight = animal.vx >= 0;
-    // Persist facing when stopped
-    if (Math.abs(animal.vx) < 2 && animal._facingRight != null) {
+    if (Math.abs(animal.vx) < 10 && animal._facingRight != null) {
       // keep last
+    } else if (
+      animal._facingRight != null &&
+      facingRight !== animal._facingRight &&
+      Math.abs(animal.vx) < 22
+    ) {
+      // keep last until lateral velocity is clearly committed
     } else {
       animal._facingRight = facingRight;
     }
