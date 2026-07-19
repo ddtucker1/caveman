@@ -151,6 +151,10 @@ function assert(cond, msg) {
     Wildborn.animal.PREDATOR_CALORIE_BURN_PER_SEC === 0.1,
     'predators burn 0.1 cal/sec (1 every 10s)'
   );
+  assert(
+    Wildborn.animal.HERBIVORE_CALORIE_BURN_MULT === 0.8,
+    'herbivores burn calories at 80% rate (20% slower)'
+  );
   assert(Wildborn.animal.EAT_RANGE === 20, 'eat range is 20px');
   assert(Wildborn.animal.PLANT_SIGHT_TILES === 25, 'herbivore plant sight is 25 tiles');
   assert(Wildborn.animal.PLANT_SIGHT_RANGE === 800, 'plant sight is 25 tiles (800px)');
@@ -229,10 +233,12 @@ function assert(cond, msg) {
   }
   const rabbit = Wildborn.animal.createAnimal('rabbit', 0, 0);
   const herbBurn = Wildborn.animal.calorieBurnPerTick(rabbit);
-  // Rabbit: 30/120/10 = 0.025 → floored to 0.1 (still the reduced herbivore path)
+  // Rabbit: 30/120/10 = 0.025 → floored to 0.1 × 0.8 = 0.08 (20% slower)
+  const expectedHerb =
+    0.1 * Wildborn.animal.HERBIVORE_CALORIE_BURN_MULT;
   assert(
-    Math.abs(herbBurn - 0.1) < 0.0001,
-    'herbivore burn stays at reduced rate (' + herbBurn + ')'
+    Math.abs(herbBurn - expectedHerb) < 0.0001,
+    'herbivore burn is 20% slower (' + herbBurn + ', expect ' + expectedHerb + ')'
   );
   assert(
     !PREDATOR_SPECIES[rabbit.species],
