@@ -7,8 +7,8 @@
   const { TILE_SIZE } = Wildborn.world;
 
   /** Invisible hitbox size (world px). Visual sprite is drawn larger in render.js. */
-  const PLAYER_SIZE = 15;
-  const BASE_SPEED = 140; // pixels per second
+  const PLAYER_SIZE = 30;
+  const BASE_SPEED = 280; // pixels per second (doubled with world scale)
   const WATER_SPEED_MULT = 0.45;
 
   function createPlayer(spawn) {
@@ -83,7 +83,7 @@
     }
 
     // Hard clamp to the fixed 400×400 map edges
-    const mapPx = world.MAP_PIXEL_SIZE || Wildborn.world.MAP_PIXEL_SIZE || 12800;
+    const mapPx = world.MAP_PIXEL_SIZE || Wildborn.world.MAP_PIXEL_SIZE || 25600;
     player.x = Math.max(0, Math.min(mapPx - player.w, player.x));
     player.y = Math.max(0, Math.min(mapPx - player.h, player.y));
 

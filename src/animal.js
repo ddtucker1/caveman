@@ -19,8 +19,8 @@
   };
 
   /** Diet-class land speeds (px/s). Per-species speed keys are aliases only. */
-  const HERBIVORE_LAND_SPEED = 30;
-  const PREDATOR_LAND_SPEED = 36;
+  const HERBIVORE_LAND_SPEED = 60;
+  const PREDATOR_LAND_SPEED = 72;
   const SPEED = {
     herbivore: HERBIVORE_LAND_SPEED,
     predator: PREDATOR_LAND_SPEED,
@@ -31,22 +31,22 @@
     fast: PREDATOR_LAND_SPEED,
     very_fast: PREDATOR_LAND_SPEED,
   };
-  const MIN_SPEED = 0.5;
-  /** Non-aquatic herbivores on water: 16 px/s (16/30 of land). */
-  const HERBIVORE_WATER_SPEED_MULT = 16 / HERBIVORE_LAND_SPEED;
-  /** Non-aquatic predators on water: 18 px/s (18/36 of land). */
-  const PREDATOR_WATER_SPEED_MULT = 18 / PREDATOR_LAND_SPEED;
+  const MIN_SPEED = 1;
+  /** Non-aquatic herbivores on water: 32 px/s (32/60 of land). */
+  const HERBIVORE_WATER_SPEED_MULT = 32 / HERBIVORE_LAND_SPEED;
+  /** Non-aquatic predators on water: 36 px/s (36/72 of land). */
+  const PREDATOR_WATER_SPEED_MULT = 36 / PREDATOR_LAND_SPEED;
   /** @deprecated Prefer diet-specific water mults; kept as predator water alias. */
   const WATER_SPEED_MULT = PREDATOR_WATER_SPEED_MULT;
-  /** Default aquatic water pace (turtles): 24 px/s (24/30 of land). */
-  const AQUATIC_WATER_SPEED_MULT = 24 / HERBIVORE_LAND_SPEED;
+  /** Default aquatic water pace (turtles): 48 px/s (48/60 of land). */
+  const AQUATIC_WATER_SPEED_MULT = 48 / HERBIVORE_LAND_SPEED;
   /** Corpse stays onscreen for 1 minute (120 ticks × 0.5s). */
   const CORPSE_DECAY_TICKS = 120;
-  const TILE_SIZE = 32;
-  /** Herbivores "see" plants within this many tiles (25 × 32 = 800px). */
+  const TILE_SIZE = 64;
+  /** Herbivores "see" plants within this many tiles (25 × 64 = 1600px). */
   const PLANT_SIGHT_TILES = 25;
   const PLANT_SIGHT_RANGE = PLANT_SIGHT_TILES * TILE_SIZE;
-  /** Predators detect food/prey within this many tiles (20 × 32 = 640px). */
+  /** Predators detect food/prey within this many tiles (20 × 64 = 1280px). */
   const PREDATOR_SIGHT_TILES = 20;
   const PREDATOR_SIGHT_RANGE = PREDATOR_SIGHT_TILES * TILE_SIZE;
 
@@ -65,7 +65,7 @@
       maxHealth: 30,
       attackPower: 2,
       color: '#c8c0b0',
-      size: 8,
+      size: 16,
     },
     deer: {
       id: 'deer',
@@ -76,7 +76,7 @@
       maxHealth: 70,
       attackPower: 4,
       color: '#8a6238',
-      size: 14,
+      size: 28,
     },
     bison: {
       id: 'bison',
@@ -87,7 +87,7 @@
       maxHealth: 200,
       attackPower: 25,
       color: '#5a4030',
-      size: 20,
+      size: 40,
     },
     ostrich: {
       id: 'ostrich',
@@ -98,7 +98,7 @@
       maxHealth: 80,
       attackPower: 18,
       color: '#b09060',
-      size: 16,
+      size: 32,
     },
     turtle: {
       id: 'turtle',
@@ -106,14 +106,14 @@
       diet: 'herbivore',
       speed: 'medium',
       aquatic: true,
-      /** 24 px/s in water with herbivore (30) land speed. */
-      waterSpeedMult: 24 / HERBIVORE_LAND_SPEED,
+      /** 48 px/s in water with herbivore (60) land speed. */
+      waterSpeedMult: 48 / HERBIVORE_LAND_SPEED,
       maxCalories: 80,
       maxHealth: 150,
       attackPower: 2,
       color: '#3a6a3a',
       accent: '#2a4a2a',
-      size: 11,
+      size: 22,
     },
   };
 
@@ -129,7 +129,7 @@
       attackStyle: 'bite',
       attackPower: 22,
       color: '#7a7a88',
-      size: 13,
+      size: 26,
     },
     bear: {
       id: 'bear',
@@ -141,7 +141,7 @@
       attackStyle: 'swipe',
       attackPower: 40,
       color: '#4a3020',
-      size: 20,
+      size: 40,
     },
     alligator: {
       id: 'alligator',
@@ -149,14 +149,14 @@
       diet: 'predator',
       speed: 'predator',
       aquatic: true,
-      /** 54 px/s in water with predator (36) land speed. */
-      waterSpeedMult: 54 / PREDATOR_LAND_SPEED,
+      /** 108 px/s in water with predator (72) land speed. */
+      waterSpeedMult: 108 / PREDATOR_LAND_SPEED,
       maxCalories: 360,
       maxHealth: 180,
       attackStyle: 'death_roll',
       attackPower: 35,
       color: '#2a5a2a',
-      size: 18,
+      size: 36,
     },
   };
 
@@ -177,18 +177,18 @@
   const HERBIVORE_CALORIE_BURN_INTERVAL_SEC = 12;
   /** Predators burn 1 calorie every 8 seconds. */
   const PREDATOR_CALORIE_BURN_INTERVAL_SEC = 8;
-  /** Animals must be within 20px of a plant to eat it. */
-  const EAT_RANGE = 20;
-  const ATTACK_RANGE = 22;
+  /** Animals must be within 40px of a plant to eat it. */
+  const EAT_RANGE = 40;
+  const ATTACK_RANGE = 44;
   /** Herbivores enter FLEE when a predator is within this range. */
-  const FLEE_ENTER_RANGE = 100;
+  const FLEE_ENTER_RANGE = 200;
   /** Herbivores stop fleeing once the predator is this far away. */
-  const FLEE_SAFE_RANGE = 200;
+  const FLEE_SAFE_RANGE = 400;
   /**
    * While eating a plant, interrupt only if a predator within this range is
    * actively targeting this animal (stubborn eating).
    */
-  const EAT_PREDATOR_INTERRUPT_RANGE = 50;
+  const EAT_PREDATOR_INTERRUPT_RANGE = 100;
   /** Plant eating: 5 calories per second per animal (real-time in updateEating). Stacks. */
   const EAT_RATE_PER_SEC = 5;
   const ATTACK_COOLDOWN_TICKS = 2;
@@ -204,7 +204,7 @@
   /** Predator prey search expands faster than herbivore plant search (tiles/sec). */
   const PREDATOR_SEARCH_EXPAND_TILES_PER_SEC = 5;
   /** Roam within this radius of spawn while not hunting. */
-  const TERRITORY_RADIUS = 200;
+  const TERRITORY_RADIUS = 400;
   /**
    * Once past TERRITORY_RADIUS, keep walking home until inside this fraction.
    * Without hysteresis, roam ↔ return flipped every frame on the boundary and
@@ -212,7 +212,7 @@
    */
   const TERRITORY_RETURN_RATIO = 0.7;
   /** Flee desperation: cross water if predator within this distance. */
-  const WATER_DESPERATION_FLEE_DIST = 100;
+  const WATER_DESPERATION_FLEE_DIST = 200;
   /** Starvation desperation: cross water below this calorie ratio. */
   const WATER_DESPERATION_STARVE_RATIO = 0.2;
   /** Seconds pinned at a water edge before allowing a temporary water crossing. */
@@ -238,8 +238,8 @@
   const SLEEP_IDLE_SECONDS = 5;
   const SLEEP_MIN_SECONDS = 10;
   const SLEEP_MAX_SECONDS = 60;
-  const SLEEP_WAKE_PREDATOR_RANGE = 150;
-  const SLEEP_WAKE_FOOD_RANGE = 100;
+  const SLEEP_WAKE_PREDATOR_RANGE = 300;
+  const SLEEP_WAKE_FOOD_RANGE = 200;
   const SLEEP_RANDOM_WAKE_CHANCE = 0.02;
   const SLEEP_TILT_SECONDS = 1;
 
@@ -267,7 +267,7 @@
     const startCal = maxCal * 0.85 + Math.random() * maxCal * 0.1;
 
     const isPred = def.diet === 'predator';
-    // All predators: 36 land; all herbivores: 30 land.
+    // All predators: 72 land; all herbivores: 60 land.
     const baseSpeed = Math.max(
       MIN_SPEED,
       isPred ? PREDATOR_LAND_SPEED : HERBIVORE_LAND_SPEED
@@ -521,7 +521,7 @@
 
   /** Max search radius that covers the full map from any point. */
   function mapSearchCap(ctx) {
-    const mapPx = (ctx && ctx.mapPixelSize) || 12800;
+    const mapPx = (ctx && ctx.mapPixelSize) || 25600;
     return mapPx * 1.5;
   }
 
@@ -608,7 +608,7 @@
    * Pick a dry (when possible) waypoint in a completely different part of the map.
    */
   function pickDistantExploreGoal(animal, ctx) {
-    const mapPx = (ctx && ctx.mapPixelSize) || 12800;
+    const mapPx = (ctx && ctx.mapPixelSize) || 25600;
     const pad = TILE_SIZE * 2;
     const minDist = mapPx * HUNGER_EXPLORE_MIN_MAP_FRAC;
     const rng = (ctx && ctx.rng) || { float: function () { return Math.random(); } };
@@ -2090,7 +2090,7 @@
     }
 
     // Stay near food (must be within 20px to eat plants)
-    const range = t.kind === 'plant' ? EAT_RANGE : EAT_RANGE + 8;
+    const range = t.kind === 'plant' ? EAT_RANGE : EAT_RANGE + 16;
     const d2 = dist2(animal.x, animal.y, t.x, t.y);
     if (d2 > range * range) {
       animal.eatLocked = false;
@@ -2338,8 +2338,8 @@
 
   /** Hard clamp animals inside the fixed 400×400 map. */
   function clampToMap(animal, mapPixelSize) {
-    mapPixelSize = mapPixelSize == null ? 12800 : mapPixelSize;
-    const pad = Math.max(4, (animal.size || 8) * 0.5);
+    mapPixelSize = mapPixelSize == null ? 25600 : mapPixelSize;
+    const pad = Math.max(8, (animal.size || 16) * 0.5);
     animal.x = Math.max(pad, Math.min(mapPixelSize - pad, animal.x));
     animal.y = Math.max(pad, Math.min(mapPixelSize - pad, animal.y));
   }

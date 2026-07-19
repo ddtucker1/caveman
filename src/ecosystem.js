@@ -52,8 +52,8 @@
     const rng = opts.rng.derive('ecosystem');
     const config = opts.config || Wildborn.config;
     const mapTiles = world.MAP_TILES || config.mapTiles || 400;
-    const mapPixelSize = world.MAP_PIXEL_SIZE || mapTiles * (world.TILE_SIZE || 32);
-    const TILE_SIZE = world.TILE_SIZE || 32;
+    const mapPixelSize = world.MAP_PIXEL_SIZE || mapTiles * (world.TILE_SIZE || 64);
+    const TILE_SIZE = world.TILE_SIZE || 64;
     const origin = opts.origin || {
       x: mapPixelSize / 2,
       y: mapPixelSize / 2,

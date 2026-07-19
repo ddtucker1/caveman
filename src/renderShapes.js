@@ -167,81 +167,93 @@
     const speed = opts.speed || 0;
 
     if (state === 'DEAD') {
-      return { ox: 0, oy: 0, sx: 1, sy: 1, rot: 0, headDip: 0 };
+      // Soft settle into the ground as corpse ages
+      const deadAge = opts.deadAge != null ? opts.deadAge : 0;
+      oy = Math.min(2.5, deadAge * 0.4);
+      return { ox: 0, oy: oy, sx: 1.05, sy: 0.92, rot: 0, headDip: 0 };
     }
 
-    // Idle breathing 1.0 → 1.02 over 2s
-    if (!moving && (state === 'IDLE' || state === 'SLEEP')) {
-      const breath = 1 + 0.02 * Math.sin((t / 2) * Math.PI * 2);
+    // Idle breathing 1.0 → 1.025 over ~2s
+    if (!moving && (state === 'IDLE' || state === 'SLEEP' || state === 'ROAM')) {
+      const breath = 1 + 0.025 * Math.sin((t / 2) * Math.PI * 2);
       sx = breath;
       sy = 2 - breath;
     }
 
-    // Gentle plant idle sway / bob / leaf rustle
+    // Gentle plant idle sway / bob / leaf rustle (higher quality)
     if (opts._isPlant || state === 'IDLE') {
       const cat = Wildborn.shapes.getCategory(entityType);
       if (cat === 'plant') {
-        const sway = Math.sin(t * 1.1) * 0.045;
-        const bob = Math.sin(t * 1.7 + 0.4) * 0.55;
-        const rustle = Math.sin(t * 2.4 + idPhase) * 0.012;
-        rot = sway + rustle;
+        const sway = Math.sin(t * 1.05) * 0.055;
+        const bob = Math.sin(t * 1.55 + 0.4) * 1.1;
+        const rustle = Math.sin(t * 2.6 + idPhase) * 0.018;
+        const gust = Math.sin(t * 0.35 + idPhase * 0.5) * 0.02;
+        rot = sway + rustle + gust;
         oy = bob;
-        sx = 1 + Math.sin(t * 1.3) * 0.015;
-        sy = 1 - Math.sin(t * 1.3) * 0.01;
+        sx = 1 + Math.sin(t * 1.25) * 0.02;
+        sy = 1 - Math.sin(t * 1.25) * 0.014;
       }
     }
 
-    // Move bob
+    // Walk bob + leg stride phase for animals
     if (moving && state !== 'EATING' && state !== 'SLEEP') {
-      oy = Math.sin(t * 8 + speed) * Math.min(1.6, 0.8 + speed * 0.01);
+      const stride = Math.min(2.8, 1.1 + speed * 0.012);
+      oy = Math.sin(t * 7.5 + speed * 0.05) * stride;
+      sx *= 1 + Math.sin(t * 15) * 0.015;
+      opts._walkPhase = t * 8;
+    } else {
+      opts._walkPhase = opts._walkPhase || 0;
     }
 
     // Eating head bob toward plant — once per second
     if (state === 'EATING' || opts.eating) {
       const phase =
         opts.eatBobPhase != null ? opts.eatBobPhase : t - Math.floor(t);
-      // Sharp bob in the first ~0.35s of each second
       const bob =
         phase < 0.35 ? Math.sin((phase / 0.35) * Math.PI) : 0;
-      headDip = bob * 4.5;
-      oy += headDip * 0.4;
-      rot = 0.18 * bob;
+      headDip = bob * 7;
+      oy += headDip * 0.45;
+      rot = 0.22 * bob;
 
-      // Locked-in stubborn eating: brief head shake every 3 seconds
       if (opts.eatLocked) {
         const lockPhase =
           opts.eatLockPhase != null ? opts.eatLockPhase : t % 3;
         if (lockPhase < 0.35) {
-          rot += Math.sin((lockPhase / 0.35) * Math.PI * 4) * 0.22;
+          rot += Math.sin((lockPhase / 0.35) * Math.PI * 4) * 0.25;
         }
       }
     }
 
     // Flee lean forward
     if ((state === 'FLEE' || opts.fleeing) && state !== 'SLEEP') {
-      rot = opts.counterAttack ? -0.15 : 0.18;
+      rot = opts.counterAttack ? -0.18 : 0.22;
+      oy -= 1;
     }
 
     // Bear rear-up
     if (opts.rearUp) {
-      sy *= 1.15;
-      sx *= 0.9;
-      oy -= 3;
+      sy *= 1.18;
+      sx *= 0.88;
+      oy -= 5;
     }
 
-    // Exhausted pant: mouth opens/closes ~3×/sec + slight body pulse
+    // Exhausted pant
     if (opts.panting) {
       const pant = Math.sin(t * Math.PI * 6);
       opts._jawOpen = 0.35 + 0.55 * (0.5 + 0.5 * pant);
-      sx *= 1 + 0.04 * pant;
-      sy *= 1 - 0.03 * pant;
+      sx *= 1 + 0.045 * pant;
+      sy *= 1 - 0.035 * pant;
     }
 
-    // Rabbit ear twitch encoded as slight vertical ear offset via opts
-    opts._earTwitch = Math.sin(t * 6) > 0.92 ? -1.5 : 0;
-    // Jaw chew (unless panting overrides)
+    // Rabbit ear twitch
+    opts._earTwitch = Math.sin(t * 5.5) > 0.9 ? -2.2 : 0;
     if (!opts.panting) {
-      opts._jawOpen = state === 'EATING' ? 0.5 + 0.5 * Math.sin(t * 12) : opts.hunting ? 0.7 : 0.15;
+      opts._jawOpen =
+        state === 'EATING'
+          ? 0.5 + 0.5 * Math.sin(t * 12)
+          : opts.hunting
+            ? 0.75
+            : 0.12;
     }
 
     return { ox: ox, oy: oy, sx: sx, sy: sy, rot: rot, headDip: headDip };
@@ -310,13 +322,69 @@
     ctx.textAlign = 'start';
   }
 
-  function drawEye(ctx, ex, ey, color, lookX, lookY) {
+  function drawEye(ctx, ex, ey, color, lookX, lookY, radius) {
     const lx = Math.max(-0.8, Math.min(0.8, lookX || 0));
     const ly = Math.max(-0.8, Math.min(0.8, lookY || 0));
-    ctx.fillStyle = color || '#fff';
+    const r = radius != null ? radius : 1.8;
+    // White/sclera for light eyes; solid for dark
+    const isDark = color === '#1a1008' || color === '#2a2018' || color === '#1a1a1e';
+    if (!isDark) {
+      ctx.fillStyle = '#f4f0e8';
+      ctx.beginPath();
+      ctx.arc(ex, ey, r * 1.35, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = color || '#2a2018';
     ctx.beginPath();
-    ctx.arc(ex + lx, ey + ly, 1.1, 0, Math.PI * 2);
+    ctx.arc(ex + lx * r * 0.35, ey + ly * r * 0.35, r, 0, Math.PI * 2);
     ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.beginPath();
+    ctx.arc(ex + lx * r * 0.35 - r * 0.3, ey + ly * r * 0.35 - r * 0.3, r * 0.28, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function drawAnimatedLegs(ctx, kind, sz, color, walkPhase, moving) {
+    ctx.strokeStyle = color || '#5a4030';
+    ctx.lineCap = 'round';
+    ctx.lineWidth =
+      kind === 'long_thin' || kind === 'very_long' || kind === 'two_thin'
+        ? Math.max(1.6, sz * 0.045)
+        : Math.max(2.2, sz * 0.07);
+    const y0 = sz * 0.25;
+    const len =
+      kind === 'very_long'
+        ? sz * 0.58
+        : kind === 'long_thin'
+          ? sz * 0.42
+          : kind === 'medium'
+            ? sz * 0.3
+            : sz * 0.22;
+    const xs =
+      kind === 'two_thin' || kind === 'very_long'
+        ? [-sz * 0.12, sz * 0.12]
+        : [-sz * 0.26, -sz * 0.1, sz * 0.08, sz * 0.24];
+    const phase = walkPhase || 0;
+    for (let i = 0; i < xs.length; i++) {
+      const swing = moving ? Math.sin(phase + i * 1.6) * sz * 0.08 : 0;
+      ctx.beginPath();
+      ctx.moveTo(xs[i], y0);
+      ctx.lineTo(xs[i] + swing + (i % 2 === 0 ? -0.8 : 0.8), y0 + len);
+      ctx.stroke();
+      // Small hoof/paw
+      ctx.fillStyle = color || '#5a4030';
+      ctx.beginPath();
+      ctx.ellipse(
+        xs[i] + swing,
+        y0 + len + 1,
+        Math.max(1.4, sz * 0.045),
+        Math.max(0.9, sz * 0.025),
+        0,
+        0,
+        Math.PI * 2
+      );
+      ctx.fill();
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -332,45 +400,48 @@
   }
 
   function drawBerryBush(ctx, def, sz, calories, time) {
-    const n = def.clusterCount || 5;
+    const n = def.clusterCount || 7;
     const leafDark = def.leafDark || '#1e5a1e';
     const leafColor = def.leafColor || def.baseColor;
-    // Under-foliage
+    // Under-foliage shadow
     ctx.fillStyle = leafDark;
     ctx.beginPath();
-    ctx.ellipse(0, sz * 0.12, sz * 0.42, sz * 0.18, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, sz * 0.14, sz * 0.48, sz * 0.2, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = def.baseColor;
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2 + 0.2;
-      const r = sz * 0.28;
-      const wobble = time != null ? Math.sin(time * 1.5 + i) * 0.4 : 0;
+      const r = sz * 0.3;
+      const wobble = time != null ? Math.sin(time * 1.5 + i) * 0.7 : 0;
       ctx.beginPath();
-      ctx.arc(Math.cos(a) * r * 0.75, Math.sin(a) * r * 0.5 - 2 + wobble * 0.15, r, 0, Math.PI * 2);
+      ctx.arc(Math.cos(a) * r * 0.78, Math.sin(a) * r * 0.52 - 3 + wobble * 0.2, r, 0, Math.PI * 2);
       ctx.fill();
     }
     // Center canopy highlight
-    ctx.fillStyle = leafColor;
+    const g = ctx.createRadialGradient(-sz * 0.08, -sz * 0.12, 1, 0, -2, sz * 0.4);
+    g.addColorStop(0, leafColor);
+    g.addColorStop(1, def.baseColor);
+    ctx.fillStyle = g;
     ctx.beginPath();
-    ctx.arc(0, -2, sz * 0.34, 0, Math.PI * 2);
+    ctx.arc(0, -3, sz * 0.36, 0, Math.PI * 2);
     ctx.fill();
 
     if (calories > (def.berryCalorieThreshold || 1)) {
       const berry = def.berryColor || def.accentColor;
       const hi = def.berryHighlight || '#e07090';
       const berries = [
-        [-4, -5], [5, -2], [-2, 3], [3, -7], [0, -1], [-5, 1], [4, 2],
+        [-5, -6], [6, -3], [-3, 4], [4, -8], [1, -1], [-6, 2], [5, 3], [-1, -4], [3, 5],
       ];
       for (let i = 0; i < berries.length; i++) {
-        const bx = berries[i][0] * (sz / 20);
-        const by = berries[i][1] * (sz / 20);
+        const bx = berries[i][0] * (sz / 40);
+        const by = berries[i][1] * (sz / 40);
         ctx.fillStyle = berry;
         ctx.beginPath();
-        ctx.arc(bx, by, Math.max(1.4, sz * 0.07), 0, Math.PI * 2);
+        ctx.arc(bx, by, Math.max(2, sz * 0.065), 0, Math.PI * 2);
         ctx.fill();
         ctx.fillStyle = hi;
         ctx.beginPath();
-        ctx.arc(bx - 0.6, by - 0.6, Math.max(0.5, sz * 0.025), 0, Math.PI * 2);
+        ctx.arc(bx - 0.9, by - 0.9, Math.max(0.7, sz * 0.022), 0, Math.PI * 2);
         ctx.fill();
       }
     }
@@ -381,22 +452,22 @@
     const color = calRatio < 0.25 ? def.depletedColor : def.baseColor;
     const dark = calRatio < 0.25 ? '#6a5030' : def.darkColor;
     const tip = def.tipColor || color;
-    const blades = 5;
+    const blades = 7;
     for (let i = 0; i < blades; i++) {
-      const bx = -sz * 0.4 + i * (sz * 0.2);
-      const lean = (i - (blades - 1) / 2) * 1.4;
-      const sway = time != null ? Math.sin((time || 0) * 2.2 + i * 0.7) * 1.2 : 0;
+      const bx = -sz * 0.42 + i * (sz * 0.14);
+      const lean = (i - (blades - 1) / 2) * 1.8;
+      const sway = time != null ? Math.sin((time || 0) * 2.1 + i * 0.65) * 2.2 : 0;
       const tipX = bx + lean + sway;
       const grad = ctx.createLinearGradient(bx, h * 0.3, tipX, -h * 0.55);
       grad.addColorStop(0, dark);
-      grad.addColorStop(0.65, color);
+      grad.addColorStop(0.6, color);
       grad.addColorStop(1, tip);
       ctx.strokeStyle = grad;
-      ctx.lineWidth = 1.4 + (i % 2) * 0.4;
+      ctx.lineWidth = 1.8 + (i % 2) * 0.6;
       ctx.lineCap = 'round';
       ctx.beginPath();
-      ctx.moveTo(bx, sz * 0.38);
-      ctx.quadraticCurveTo(bx + lean * 0.5, -h * 0.05, tipX, -h * 0.5);
+      ctx.moveTo(bx, sz * 0.4);
+      ctx.quadraticCurveTo(bx + lean * 0.5, -h * 0.05, tipX, -h * 0.52);
       ctx.stroke();
     }
   }
@@ -538,7 +609,9 @@
   function drawHerbivore(ctx, type, def, sz, opts, time, anim) {
     const lookX = opts.lookX || 0;
     const lookY = opts.lookY || 0;
-    const headY = opts.eating || opts.state === 'EATING' ? 1.5 : 0;
+    const headY = opts.eating || opts.state === 'EATING' ? 2.5 : 0;
+    opts._moving = !!opts.moving;
+    opts._walkPhase = opts._walkPhase || 0;
 
     if (type === 'rabbit') drawRabbit(ctx, def, sz, opts, lookX, lookY, headY);
     else if (type === 'deer') drawDeer(ctx, def, sz, opts, lookX, lookY, headY);
@@ -548,211 +621,322 @@
   }
 
   function drawLegs(ctx, kind, sz, color) {
-    ctx.strokeStyle = color || '#5a4030';
-    ctx.lineWidth = kind === 'long_thin' || kind === 'very_long' || kind === 'two_thin' ? 1.2 : 2;
-    const y0 = sz * 0.25;
-    const len =
-      kind === 'very_long' ? sz * 0.55 :
-      kind === 'long_thin' ? sz * 0.4 :
-      kind === 'medium' ? sz * 0.28 :
-      sz * 0.2;
-    const xs =
-      kind === 'two_thin' || kind === 'very_long'
-        ? [-sz * 0.12, sz * 0.12]
-        : [-sz * 0.25, -sz * 0.1, sz * 0.08, sz * 0.22];
-    for (let i = 0; i < xs.length; i++) {
-      ctx.beginPath();
-      ctx.moveTo(xs[i], y0);
-      ctx.lineTo(xs[i] + (i % 2 === 0 ? -0.5 : 0.5), y0 + len);
-      ctx.stroke();
-    }
+    drawAnimatedLegs(ctx, kind, sz, color, 0, false);
   }
 
   function drawRabbit(ctx, def, sz, opts, lookX, lookY, headY) {
-    drawLegs(ctx, 'short', sz, def.bodyColor);
-    // Body
-    ctx.fillStyle = def.bodyColor;
+    drawAnimatedLegs(ctx, 'short', sz, def.bodyShade || def.bodyColor, opts._walkPhase, opts._moving);
+    // Soft underbelly
+    ctx.fillStyle = def.tailColor || '#f8f4ec';
     ctx.beginPath();
-    ctx.ellipse(0, headY, sz * 0.42, sz * 0.32, 0, 0, Math.PI * 2);
+    ctx.ellipse(sz * 0.02, headY + sz * 0.1, sz * 0.32, sz * 0.16, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Body with shading
+    const bodyGrad = ctx.createRadialGradient(-sz * 0.1, headY - sz * 0.1, 1, 0, headY, sz * 0.45);
+    bodyGrad.addColorStop(0, def.bodyColor);
+    bodyGrad.addColorStop(1, def.bodyShade || '#b89870');
+    ctx.fillStyle = bodyGrad;
+    ctx.beginPath();
+    ctx.ellipse(0, headY, sz * 0.44, sz * 0.34, 0, 0, Math.PI * 2);
     ctx.fill();
     // Head
+    ctx.fillStyle = def.bodyColor;
     ctx.beginPath();
-    ctx.ellipse(sz * 0.28, headY - sz * 0.08, sz * 0.22, sz * 0.2, 0, 0, Math.PI * 2);
+    ctx.ellipse(sz * 0.3, headY - sz * 0.1, sz * 0.24, sz * 0.22, 0, 0, Math.PI * 2);
     ctx.fill();
-    // Ears
+    // Cheek fluff
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.beginPath();
+    ctx.ellipse(sz * 0.38, headY - sz * 0.02, sz * 0.1, sz * 0.08, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Ears with pink inner
     const twitch = opts._earTwitch || 0;
     ctx.fillStyle = def.earColor;
     ctx.beginPath();
-    ctx.ellipse(sz * 0.22, headY - sz * 0.42 + twitch, sz * 0.08, sz * 0.28, -0.15, 0, Math.PI * 2);
+    ctx.ellipse(sz * 0.22, headY - sz * 0.44 + twitch, sz * 0.09, sz * 0.3, -0.18, 0, Math.PI * 2);
     ctx.fill();
     ctx.beginPath();
-    ctx.ellipse(sz * 0.34, headY - sz * 0.4 + twitch * 0.5, sz * 0.07, sz * 0.26, 0.1, 0, Math.PI * 2);
+    ctx.ellipse(sz * 0.36, headY - sz * 0.42 + twitch * 0.5, sz * 0.08, sz * 0.28, 0.12, 0, Math.PI * 2);
     ctx.fill();
-    // Cotton tail
+    ctx.fillStyle = def.earInner || '#e8b8b0';
+    ctx.beginPath();
+    ctx.ellipse(sz * 0.22, headY - sz * 0.44 + twitch, sz * 0.04, sz * 0.2, -0.18, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(sz * 0.36, headY - sz * 0.42 + twitch * 0.5, sz * 0.035, sz * 0.18, 0.12, 0, Math.PI * 2);
+    ctx.fill();
+    // Cotton tail with highlight
     ctx.fillStyle = def.tailColor;
     ctx.beginPath();
-    ctx.arc(-sz * 0.38, headY + sz * 0.05, sz * 0.14, 0, Math.PI * 2);
+    ctx.arc(-sz * 0.4, headY + sz * 0.04, sz * 0.15, 0, Math.PI * 2);
     ctx.fill();
-    drawEye(ctx, sz * 0.36, headY - sz * 0.12, def.eyeColor, lookX, lookY);
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(-sz * 0.42, headY, sz * 0.05, 0, Math.PI * 2);
+    ctx.fill();
+    // Nose
+    ctx.fillStyle = def.noseColor || '#c07070';
+    ctx.beginPath();
+    ctx.ellipse(sz * 0.48, headY - sz * 0.06, sz * 0.04, sz * 0.03, 0, 0, Math.PI * 2);
+    ctx.fill();
+    drawEye(ctx, sz * 0.38, headY - sz * 0.14, def.eyeColor, lookX, lookY, Math.max(1.6, sz * 0.055));
   }
 
   function drawDeer(ctx, def, sz, opts, lookX, lookY, headY) {
-    drawLegs(ctx, 'long_thin', sz, def.bodyColor);
+    drawAnimatedLegs(ctx, 'long_thin', sz, def.bodyShade || def.bodyColor, opts._walkPhase, opts._moving);
+    // Belly
+    ctx.fillStyle = def.bellyColor || '#e8d4a8';
+    ctx.beginPath();
+    ctx.ellipse(0, headY + sz * 0.1, sz * 0.4, sz * 0.16, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Graceful body
+    const g = ctx.createLinearGradient(0, headY - sz * 0.25, 0, headY + sz * 0.25);
+    g.addColorStop(0, def.bodyColor);
+    g.addColorStop(1, def.bodyShade || '#a88848');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.ellipse(0, headY, sz * 0.5, sz * 0.3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Neck
     ctx.fillStyle = def.bodyColor;
     ctx.beginPath();
-    ctx.ellipse(0, headY, sz * 0.48, sz * 0.3, 0, 0, Math.PI * 2);
+    ctx.ellipse(sz * 0.36, headY - sz * 0.2, sz * 0.14, sz * 0.24, 0.35, 0, Math.PI * 2);
     ctx.fill();
-    // Neck + head
+    // Head
     ctx.beginPath();
-    ctx.ellipse(sz * 0.38, headY - sz * 0.18, sz * 0.16, sz * 0.2, 0.3, 0, Math.PI * 2);
+    ctx.ellipse(sz * 0.48, headY - sz * 0.28, sz * 0.16, sz * 0.14, 0.15, 0, Math.PI * 2);
     ctx.fill();
     // Ears
     ctx.fillStyle = def.earColor;
     ctx.beginPath();
-    ctx.moveTo(sz * 0.32, headY - sz * 0.35);
-    ctx.lineTo(sz * 0.28, headY - sz * 0.48);
-    ctx.lineTo(sz * 0.38, headY - sz * 0.35);
+    ctx.moveTo(sz * 0.4, headY - sz * 0.38);
+    ctx.lineTo(sz * 0.36, headY - sz * 0.54);
+    ctx.lineTo(sz * 0.48, headY - sz * 0.4);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(sz * 0.5, headY - sz * 0.38);
+    ctx.lineTo(sz * 0.54, headY - sz * 0.52);
+    ctx.lineTo(sz * 0.58, headY - sz * 0.36);
     ctx.fill();
     // Antlers on males
     if (opts.sex === 'male' && opts.isAdult !== false) {
       ctx.strokeStyle = def.antlerColor;
-      ctx.lineWidth = 1.4;
+      ctx.lineWidth = Math.max(1.8, sz * 0.045);
+      ctx.lineCap = 'round';
       ctx.beginPath();
-      ctx.moveTo(sz * 0.34, headY - sz * 0.38);
-      ctx.lineTo(sz * 0.3, headY - sz * 0.58);
-      ctx.lineTo(sz * 0.22, headY - sz * 0.52);
-      ctx.moveTo(sz * 0.3, headY - sz * 0.58);
-      ctx.lineTo(sz * 0.36, headY - sz * 0.62);
+      ctx.moveTo(sz * 0.42, headY - sz * 0.4);
+      ctx.lineTo(sz * 0.38, headY - sz * 0.62);
+      ctx.lineTo(sz * 0.28, headY - sz * 0.55);
+      ctx.moveTo(sz * 0.38, headY - sz * 0.62);
+      ctx.lineTo(sz * 0.42, headY - sz * 0.7);
+      ctx.moveTo(sz * 0.52, headY - sz * 0.4);
+      ctx.lineTo(sz * 0.56, headY - sz * 0.6);
+      ctx.lineTo(sz * 0.64, headY - sz * 0.52);
+      ctx.moveTo(sz * 0.56, headY - sz * 0.6);
+      ctx.lineTo(sz * 0.58, headY - sz * 0.68);
       ctx.stroke();
     }
-    // Short tail
-    ctx.fillStyle = def.bodyColor;
-    ctx.fillRect(-sz * 0.5, headY - sz * 0.05, sz * 0.12, sz * 0.08);
-    drawEye(ctx, sz * 0.48, headY - sz * 0.22, def.eyeColor, lookX, lookY);
+    // Tail tuft
+    ctx.fillStyle = def.bellyColor || '#e8d4a8';
+    ctx.beginPath();
+    ctx.ellipse(-sz * 0.5, headY - sz * 0.02, sz * 0.08, sz * 0.12, 0.3, 0, Math.PI * 2);
+    ctx.fill();
+    // Nose
+    ctx.fillStyle = def.noseColor || '#3a2818';
+    ctx.beginPath();
+    ctx.ellipse(sz * 0.6, headY - sz * 0.24, sz * 0.035, sz * 0.025, 0, 0, Math.PI * 2);
+    ctx.fill();
+    drawEye(ctx, sz * 0.52, headY - sz * 0.3, def.eyeColor, lookX, lookY, Math.max(1.7, sz * 0.04));
   }
 
-
-
   function drawBison(ctx, def, sz, opts, lookX, lookY, headY) {
-    drawLegs(ctx, 'short_thick', sz, def.bodyColor);
-    // Body
+    drawAnimatedLegs(ctx, 'short_thick', sz, def.bodyShade || def.bodyColor, opts._walkPhase, opts._moving);
+    // Massive shaggy body
     ctx.fillStyle = def.bodyColor;
-    roundRect(ctx, -sz * 0.48, headY - sz * 0.22, sz * 0.95, sz * 0.5, 3);
+    roundRect(ctx, -sz * 0.5, headY - sz * 0.22, sz * 0.98, sz * 0.52, 6);
     ctx.fill();
+    // Fur texture strokes
+    ctx.strokeStyle = def.furHighlight || '#5a4030';
+    ctx.lineWidth = 1.2;
+    for (let i = 0; i < 6; i++) {
+      const fx = -sz * 0.35 + i * sz * 0.12;
+      ctx.beginPath();
+      ctx.moveTo(fx, headY - sz * 0.05);
+      ctx.lineTo(fx + 1, headY + sz * 0.18);
+      ctx.stroke();
+    }
     // Shoulder hump
     ctx.fillStyle = def.humpColor;
     ctx.beginPath();
-    ctx.ellipse(sz * 0.05, headY - sz * 0.28, sz * 0.28, sz * 0.22, 0, 0, Math.PI * 2);
+    ctx.ellipse(sz * 0.02, headY - sz * 0.3, sz * 0.32, sz * 0.24, 0, 0, Math.PI * 2);
     ctx.fill();
-    // Head
+    ctx.fillStyle = def.furHighlight || '#5a4030';
+    ctx.beginPath();
+    ctx.ellipse(sz * 0.08, headY - sz * 0.34, sz * 0.14, sz * 0.1, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Broad head with beard
     ctx.fillStyle = def.bodyColor;
     ctx.beginPath();
-    ctx.ellipse(sz * 0.42, headY - sz * 0.05, sz * 0.2, sz * 0.18, 0, 0, Math.PI * 2);
+    ctx.ellipse(sz * 0.44, headY - sz * 0.02, sz * 0.24, sz * 0.2, 0, 0, Math.PI * 2);
     ctx.fill();
-    // Tiny horns
-    ctx.strokeStyle = def.hornColor;
-    ctx.lineWidth = 1.5;
+    ctx.fillStyle = def.humpColor;
     ctx.beginPath();
-    ctx.moveTo(sz * 0.35, headY - sz * 0.2);
-    ctx.lineTo(sz * 0.32, headY - sz * 0.32);
-    ctx.moveTo(sz * 0.48, headY - sz * 0.18);
-    ctx.lineTo(sz * 0.52, headY - sz * 0.3);
+    ctx.ellipse(sz * 0.48, headY + sz * 0.12, sz * 0.14, sz * 0.12, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Curved horns
+    ctx.strokeStyle = def.hornColor;
+    ctx.lineWidth = Math.max(2.2, sz * 0.05);
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(sz * 0.34, headY - sz * 0.16);
+    ctx.quadraticCurveTo(sz * 0.28, headY - sz * 0.36, sz * 0.38, headY - sz * 0.32);
+    ctx.moveTo(sz * 0.52, headY - sz * 0.16);
+    ctx.quadraticCurveTo(sz * 0.58, headY - sz * 0.36, sz * 0.5, headY - sz * 0.32);
     ctx.stroke();
     // Bushy tail
     ctx.fillStyle = def.humpColor;
     ctx.beginPath();
-    ctx.ellipse(-sz * 0.5, headY + sz * 0.05, sz * 0.1, sz * 0.14, 0.4, 0, Math.PI * 2);
+    ctx.ellipse(-sz * 0.52, headY + sz * 0.05, sz * 0.1, sz * 0.16, 0.45, 0, Math.PI * 2);
     ctx.fill();
-    drawEye(ctx, sz * 0.52, headY - sz * 0.1, def.eyeColor, lookX, lookY);
+    ctx.fillStyle = def.noseColor || '#1a1008';
+    ctx.beginPath();
+    ctx.ellipse(sz * 0.62, headY + sz * 0.02, sz * 0.05, sz * 0.04, 0, 0, Math.PI * 2);
+    ctx.fill();
+    drawEye(ctx, sz * 0.5, headY - sz * 0.1, def.eyeColor, lookX, lookY, Math.max(1.8, sz * 0.035));
   }
 
   function drawOstrich(ctx, def, sz, opts, lookX, lookY, headY) {
-    // Very long legs
+    // Very long legs with knee joint
     ctx.strokeStyle = def.legColor;
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = Math.max(2, sz * 0.05);
+    ctx.lineCap = 'round';
+    const walk = opts._moving ? Math.sin(opts._walkPhase || 0) * sz * 0.1 : 0;
     ctx.beginPath();
-    ctx.moveTo(-sz * 0.08, sz * 0.1);
-    ctx.lineTo(-sz * 0.12, sz * 0.65);
-    ctx.moveTo(sz * 0.1, sz * 0.1);
-    ctx.lineTo(sz * 0.14, sz * 0.65);
+    ctx.moveTo(-sz * 0.08, sz * 0.08);
+    ctx.lineTo(-sz * 0.1 + walk, sz * 0.38);
+    ctx.lineTo(-sz * 0.14 + walk, sz * 0.68);
+    ctx.moveTo(sz * 0.1, sz * 0.08);
+    ctx.lineTo(sz * 0.12 - walk, sz * 0.38);
+    ctx.lineTo(sz * 0.16 - walk, sz * 0.68);
     ctx.stroke();
-    // Body
+    // Feet
+    ctx.lineWidth = Math.max(1.5, sz * 0.035);
+    ctx.beginPath();
+    ctx.moveTo(-sz * 0.14 + walk, sz * 0.68);
+    ctx.lineTo(-sz * 0.22 + walk, sz * 0.72);
+    ctx.moveTo(sz * 0.16 - walk, sz * 0.68);
+    ctx.lineTo(sz * 0.24 - walk, sz * 0.72);
+    ctx.stroke();
+    // Round dark body
     ctx.fillStyle = def.bodyColor;
     ctx.beginPath();
-    ctx.ellipse(0, headY, sz * 0.35, sz * 0.28, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, headY, sz * 0.38, sz * 0.3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = def.bodyShade || '#0e0e0e';
+    ctx.beginPath();
+    ctx.ellipse(-sz * 0.05, headY + sz * 0.05, sz * 0.22, sz * 0.18, 0, 0, Math.PI * 2);
     ctx.fill();
     // White wing tips
     ctx.fillStyle = def.wingColor;
     ctx.beginPath();
-    ctx.ellipse(sz * 0.05, headY + sz * 0.05, sz * 0.18, sz * 0.1, 0.2, 0, Math.PI * 2);
+    ctx.ellipse(sz * 0.08, headY + sz * 0.04, sz * 0.2, sz * 0.12, 0.25, 0, Math.PI * 2);
     ctx.fill();
     // Feather fan tail
     ctx.fillStyle = def.bodyColor;
     ctx.beginPath();
-    ctx.moveTo(-sz * 0.3, headY);
-    ctx.lineTo(-sz * 0.55, headY - sz * 0.2);
-    ctx.lineTo(-sz * 0.5, headY + sz * 0.15);
+    ctx.moveTo(-sz * 0.32, headY);
+    ctx.quadraticCurveTo(-sz * 0.62, headY - sz * 0.28, -sz * 0.55, headY + sz * 0.05);
+    ctx.quadraticCurveTo(-sz * 0.6, headY + sz * 0.22, -sz * 0.32, headY + sz * 0.1);
     ctx.fill();
-    // Long neck
-    ctx.strokeStyle = def.neckColor;
-    ctx.lineWidth = 2.2;
+    ctx.fillStyle = def.wingColor;
     ctx.beginPath();
-    ctx.moveTo(sz * 0.2, headY - sz * 0.1);
-    ctx.quadraticCurveTo(sz * 0.28, headY - sz * 0.45, sz * 0.32, headY - sz * 0.65);
+    ctx.moveTo(-sz * 0.4, headY - sz * 0.05);
+    ctx.lineTo(-sz * 0.58, headY - sz * 0.18);
+    ctx.lineTo(-sz * 0.48, headY + sz * 0.02);
+    ctx.fill();
+    // Long S-curve neck
+    ctx.strokeStyle = def.neckColor;
+    ctx.lineWidth = Math.max(2.8, sz * 0.07);
+    ctx.beginPath();
+    ctx.moveTo(sz * 0.18, headY - sz * 0.12);
+    ctx.bezierCurveTo(
+      sz * 0.28,
+      headY - sz * 0.35,
+      sz * 0.22,
+      headY - sz * 0.55,
+      sz * 0.34,
+      headY - sz * 0.72
+    );
     ctx.stroke();
-    // Head
+    // Small head + beak
     ctx.fillStyle = def.neckColor;
     ctx.beginPath();
-    ctx.ellipse(sz * 0.36, headY - sz * 0.68, sz * 0.1, sz * 0.08, 0, 0, Math.PI * 2);
+    ctx.ellipse(sz * 0.4, headY - sz * 0.74, sz * 0.11, sz * 0.09, 0, 0, Math.PI * 2);
     ctx.fill();
-    drawEye(ctx, sz * 0.4, headY - sz * 0.7, def.eyeColor, lookX, lookY);
+    ctx.fillStyle = def.beakColor || '#c89040';
+    ctx.beginPath();
+    ctx.moveTo(sz * 0.48, headY - sz * 0.74);
+    ctx.lineTo(sz * 0.62, headY - sz * 0.72);
+    ctx.lineTo(sz * 0.48, headY - sz * 0.68);
+    ctx.fill();
+    drawEye(ctx, sz * 0.42, headY - sz * 0.76, def.eyeColor, lookX, lookY, Math.max(1.5, sz * 0.035));
   }
 
   function drawTurtle(ctx, def, sz, opts, lookX, lookY, headY) {
-    // Legs
-    ctx.fillStyle = def.bodyColor;
+    // Webbed/short legs
+    ctx.fillStyle = def.bodyShade || def.bodyColor;
+    const walk = opts._moving ? Math.sin(opts._walkPhase || 0) * sz * 0.04 : 0;
     const feet = [
-      [-sz * 0.3, sz * 0.2],
-      [sz * 0.25, sz * 0.2],
-      [-sz * 0.28, -sz * 0.05],
-      [sz * 0.22, -sz * 0.05],
+      [-sz * 0.32 + walk, sz * 0.22],
+      [sz * 0.26 - walk, sz * 0.22],
+      [-sz * 0.3 - walk, -sz * 0.06],
+      [sz * 0.24 + walk, -sz * 0.06],
     ];
     for (let i = 0; i < feet.length; i++) {
       ctx.beginPath();
-      ctx.ellipse(feet[i][0], headY + feet[i][1], sz * 0.1, sz * 0.07, 0, 0, Math.PI * 2);
+      ctx.ellipse(feet[i][0], headY + feet[i][1], sz * 0.12, sz * 0.08, 0, 0, Math.PI * 2);
       ctx.fill();
     }
-    // Shell dome
-    ctx.fillStyle = def.shellColor;
+    // Shell dome with highlight
+    const shellGrad = ctx.createRadialGradient(-sz * 0.1, headY - sz * 0.15, 2, 0, headY, sz * 0.5);
+    shellGrad.addColorStop(0, def.shellLight || '#4e8a4e');
+    shellGrad.addColorStop(1, def.shellColor);
+    ctx.fillStyle = shellGrad;
     ctx.beginPath();
-    ctx.ellipse(0, headY, sz * 0.45, sz * 0.32, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, headY, sz * 0.48, sz * 0.34, 0, 0, Math.PI * 2);
     ctx.fill();
-    // Hex pattern
+    // Hex / scute pattern
     ctx.strokeStyle = def.shellLineColor;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(-sz * 0.15, headY - sz * 0.15);
-    ctx.lineTo(0, headY - sz * 0.22);
-    ctx.lineTo(sz * 0.15, headY - sz * 0.15);
-    ctx.lineTo(sz * 0.15, headY);
-    ctx.lineTo(0, headY + sz * 0.08);
-    ctx.lineTo(-sz * 0.15, headY);
-    ctx.closePath();
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(0, headY - sz * 0.22);
-    ctx.lineTo(0, headY + sz * 0.08);
-    ctx.stroke();
+    ctx.lineWidth = Math.max(1.2, sz * 0.035);
+    const scutes = [
+      [0, -sz * 0.08, sz * 0.14],
+      [-sz * 0.22, 0, sz * 0.12],
+      [sz * 0.22, 0, sz * 0.12],
+      [-sz * 0.12, sz * 0.14, sz * 0.1],
+      [sz * 0.12, sz * 0.14, sz * 0.1],
+    ];
+    for (let i = 0; i < scutes.length; i++) {
+      ctx.beginPath();
+      for (let a = 0; a < 6; a++) {
+        const ang = (a / 6) * Math.PI * 2 - Math.PI / 2;
+        const px = scutes[i][0] + Math.cos(ang) * scutes[i][2];
+        const py = headY + scutes[i][1] + Math.sin(ang) * scutes[i][2] * 0.75;
+        if (a === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.stroke();
+    }
     // Head
     ctx.fillStyle = def.bodyColor;
     ctx.beginPath();
-    ctx.ellipse(sz * 0.42, headY, sz * 0.14, sz * 0.1, 0, 0, Math.PI * 2);
+    ctx.ellipse(sz * 0.46, headY - sz * 0.02, sz * 0.16, sz * 0.12, 0, 0, Math.PI * 2);
     ctx.fill();
     // Stubby tail
     ctx.beginPath();
-    ctx.ellipse(-sz * 0.45, headY + 1, sz * 0.08, sz * 0.05, 0, 0, Math.PI * 2);
+    ctx.ellipse(-sz * 0.48, headY + 2, sz * 0.09, sz * 0.055, 0, 0, Math.PI * 2);
     ctx.fill();
-    drawEye(ctx, sz * 0.5, headY - 1, def.eyeColor, lookX, lookY);
+    drawEye(ctx, sz * 0.54, headY - sz * 0.05, def.eyeColor, lookX, lookY, Math.max(1.5, sz * 0.04));
   }
 
   // ---------------------------------------------------------------------------
@@ -762,7 +946,9 @@
   function drawPredator(ctx, type, def, sz, opts, time, anim) {
     const lookX = opts.lookX || 0;
     const lookY = opts.lookY || 0;
-    const headY = opts.eating || opts.state === 'EATING' ? 1.8 : 0;
+    const headY = opts.eating || opts.state === 'EATING' ? 2.8 : 0;
+    opts._moving = !!opts.moving;
+    opts._walkPhase = opts._walkPhase || 0;
 
     if (type === 'wolf') drawWolf(ctx, def, sz, opts, lookX, lookY, headY);
     else if (type === 'bear') drawBear(ctx, def, sz, opts, lookX, lookY, headY);
@@ -770,137 +956,231 @@
   }
 
   function drawWolf(ctx, def, sz, opts, lookX, lookY, headY) {
-    drawLegs(ctx, 'medium', sz, def.bodyColor);
+    drawAnimatedLegs(ctx, 'medium', sz, def.bodyShade || def.bodyColor, opts._walkPhase, opts._moving);
     // Bushy tail
     ctx.fillStyle = def.tailColor;
     ctx.beginPath();
-    ctx.ellipse(-sz * 0.48, headY - sz * 0.05, sz * 0.18, sz * 0.12, 0.4, 0, Math.PI * 2);
+    ctx.ellipse(-sz * 0.5, headY - sz * 0.08, sz * 0.2, sz * 0.12, 0.5, 0, Math.PI * 2);
     ctx.fill();
-    // Lean body
+    ctx.fillStyle = def.bodyShade || '#6a6a74';
+    ctx.beginPath();
+    ctx.ellipse(-sz * 0.55, headY - sz * 0.04, sz * 0.1, sz * 0.07, 0.5, 0, Math.PI * 2);
+    ctx.fill();
+    // Lean body + lighter belly
+    ctx.fillStyle = def.bellyColor || '#c8c4c0';
+    ctx.beginPath();
+    ctx.ellipse(sz * 0.02, headY + sz * 0.1, sz * 0.36, sz * 0.14, 0, 0, Math.PI * 2);
+    ctx.fill();
     ctx.fillStyle = def.bodyColor;
     ctx.beginPath();
-    ctx.ellipse(0, headY, sz * 0.45, sz * 0.28, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, headY, sz * 0.48, sz * 0.28, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Shoulder fur tuft
+    ctx.fillStyle = def.bodyShade || '#6a6a74';
+    ctx.beginPath();
+    ctx.ellipse(sz * 0.12, headY - sz * 0.16, sz * 0.16, sz * 0.1, -0.2, 0, Math.PI * 2);
     ctx.fill();
     // Head / snout
     ctx.fillStyle = def.snoutColor;
     ctx.beginPath();
-    ctx.ellipse(sz * 0.35, headY - sz * 0.08, sz * 0.22, sz * 0.16, 0, 0, Math.PI * 2);
+    ctx.ellipse(sz * 0.36, headY - sz * 0.1, sz * 0.22, sz * 0.18, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.beginPath();
-    ctx.moveTo(sz * 0.45, headY - sz * 0.05);
-    ctx.lineTo(sz * 0.65, headY);
-    ctx.lineTo(sz * 0.45, headY + sz * 0.08);
+    ctx.moveTo(sz * 0.48, headY - sz * 0.06);
+    ctx.lineTo(sz * 0.7, headY);
+    ctx.lineTo(sz * 0.48, headY + sz * 0.1);
+    ctx.fill();
+    // Nose
+    ctx.fillStyle = def.noseColor || '#1a1a1e';
+    ctx.beginPath();
+    ctx.ellipse(sz * 0.7, headY, sz * 0.04, sz * 0.03, 0, 0, Math.PI * 2);
     ctx.fill();
     // Teeth when hunting
     if (opts.hunting || opts._jawOpen > 0.5) {
       ctx.fillStyle = def.toothColor;
-      ctx.fillRect(sz * 0.52, headY + 1, 1.5, 2.5);
-      ctx.fillRect(sz * 0.58, headY + 1, 1.5, 2);
+      const open = (opts._jawOpen || 0.5) * sz * 0.04;
+      ctx.fillRect(sz * 0.54, headY + 1, Math.max(1.5, sz * 0.035), 2.5 + open);
+      ctx.fillRect(sz * 0.62, headY + 1, Math.max(1.5, sz * 0.035), 2 + open);
     }
-    // Pointed ears
+    // Pointed ears with pink inner
     ctx.fillStyle = def.earColor;
     ctx.beginPath();
-    ctx.moveTo(sz * 0.22, headY - sz * 0.2);
-    ctx.lineTo(sz * 0.18, headY - sz * 0.42);
-    ctx.lineTo(sz * 0.32, headY - sz * 0.22);
+    ctx.moveTo(sz * 0.22, headY - sz * 0.22);
+    ctx.lineTo(sz * 0.16, headY - sz * 0.46);
+    ctx.lineTo(sz * 0.34, headY - sz * 0.24);
     ctx.fill();
     ctx.beginPath();
-    ctx.moveTo(sz * 0.34, headY - sz * 0.2);
-    ctx.lineTo(sz * 0.38, headY - sz * 0.4);
-    ctx.lineTo(sz * 0.44, headY - sz * 0.18);
+    ctx.moveTo(sz * 0.36, headY - sz * 0.22);
+    ctx.lineTo(sz * 0.4, headY - sz * 0.44);
+    ctx.lineTo(sz * 0.48, headY - sz * 0.2);
     ctx.fill();
-    drawEye(ctx, sz * 0.4, headY - sz * 0.14, def.eyeColor, lookX, lookY);
+    ctx.fillStyle = def.earInner || '#c08080';
+    ctx.beginPath();
+    ctx.moveTo(sz * 0.24, headY - sz * 0.26);
+    ctx.lineTo(sz * 0.2, headY - sz * 0.4);
+    ctx.lineTo(sz * 0.3, headY - sz * 0.26);
+    ctx.fill();
+    drawEye(ctx, sz * 0.4, headY - sz * 0.16, def.eyeColor, lookX, lookY, Math.max(1.7, sz * 0.04));
   }
 
-
-
   function drawBear(ctx, def, sz, opts, lookX, lookY, headY) {
-    if (!opts.rearUp) drawLegs(ctx, 'short_thick', sz, def.bodyColor);
-    else {
-      // Hind-leg stand: legs under body
+    if (!opts.rearUp) {
+      drawAnimatedLegs(ctx, 'short_thick', sz, def.bodyShade || def.bodyColor, opts._walkPhase, opts._moving);
+    } else {
       ctx.strokeStyle = def.bodyColor;
-      ctx.lineWidth = 2.5;
+      ctx.lineWidth = Math.max(3, sz * 0.07);
+      ctx.lineCap = 'round';
       ctx.beginPath();
       ctx.moveTo(-sz * 0.1, sz * 0.15);
-      ctx.lineTo(-sz * 0.12, sz * 0.45);
+      ctx.lineTo(-sz * 0.12, sz * 0.48);
       ctx.moveTo(sz * 0.1, sz * 0.15);
-      ctx.lineTo(sz * 0.12, sz * 0.45);
+      ctx.lineTo(sz * 0.12, sz * 0.48);
+      ctx.stroke();
+      // Raised paws
+      ctx.beginPath();
+      ctx.moveTo(-sz * 0.28, -sz * 0.05);
+      ctx.lineTo(-sz * 0.4, -sz * 0.28);
+      ctx.moveTo(sz * 0.28, -sz * 0.05);
+      ctx.lineTo(sz * 0.4, -sz * 0.28);
       ctx.stroke();
     }
-    // Bulky body
+    // Bulky grizzly body
     ctx.fillStyle = def.bodyColor;
-    roundRect(ctx, -sz * 0.45, headY - sz * 0.3, sz * 0.9, sz * 0.55, 5);
+    roundRect(ctx, -sz * 0.48, headY - sz * 0.32, sz * 0.94, sz * 0.58, 7);
     ctx.fill();
-    // Head
+    // Shoulder hump / fur highlight
+    ctx.fillStyle = def.furHighlight || '#6a4830';
     ctx.beginPath();
-    ctx.ellipse(sz * 0.38, headY - sz * 0.1, sz * 0.22, sz * 0.2, 0, 0, Math.PI * 2);
+    ctx.ellipse(sz * 0.05, headY - sz * 0.3, sz * 0.28, sz * 0.16, 0, 0, Math.PI * 2);
     ctx.fill();
-    // Lighter snout patch
+    // Fur texture
+    ctx.strokeStyle = 'rgba(30,16,8,0.25)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 5; i++) {
+      ctx.beginPath();
+      ctx.moveTo(-sz * 0.3 + i * sz * 0.14, headY);
+      ctx.lineTo(-sz * 0.28 + i * sz * 0.14, headY + sz * 0.18);
+      ctx.stroke();
+    }
+    // Head
+    ctx.fillStyle = def.bodyColor;
+    ctx.beginPath();
+    ctx.ellipse(sz * 0.4, headY - sz * 0.1, sz * 0.24, sz * 0.22, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Snout patch
     ctx.fillStyle = def.snoutColor;
     ctx.beginPath();
-    ctx.ellipse(sz * 0.52, headY - sz * 0.02, sz * 0.12, sz * 0.1, 0, 0, Math.PI * 2);
+    ctx.ellipse(sz * 0.56, headY, sz * 0.14, sz * 0.12, 0, 0, Math.PI * 2);
     ctx.fill();
-    // Ears
+    ctx.fillStyle = def.noseColor || '#1a1008';
+    ctx.beginPath();
+    ctx.ellipse(sz * 0.66, headY + sz * 0.02, sz * 0.045, sz * 0.035, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Rounded ears
     ctx.fillStyle = def.earColor;
     ctx.beginPath();
-    ctx.arc(sz * 0.28, headY - sz * 0.3, sz * 0.09, 0, Math.PI * 2);
+    ctx.arc(sz * 0.28, headY - sz * 0.32, sz * 0.1, 0, Math.PI * 2);
     ctx.fill();
     ctx.beginPath();
-    ctx.arc(sz * 0.42, headY - sz * 0.3, sz * 0.09, 0, Math.PI * 2);
+    ctx.arc(sz * 0.44, headY - sz * 0.32, sz * 0.1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = def.snoutColor;
+    ctx.beginPath();
+    ctx.arc(sz * 0.28, headY - sz * 0.32, sz * 0.045, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(sz * 0.44, headY - sz * 0.32, sz * 0.045, 0, Math.PI * 2);
     ctx.fill();
     // Stubby tail
     ctx.fillStyle = def.bodyColor;
     ctx.beginPath();
-    ctx.arc(-sz * 0.45, headY + sz * 0.05, sz * 0.08, 0, Math.PI * 2);
+    ctx.arc(-sz * 0.48, headY + sz * 0.05, sz * 0.09, 0, Math.PI * 2);
     ctx.fill();
-    // Jaw chew
     if (opts.eating || opts.state === 'EATING') {
       ctx.fillStyle = '#2a1810';
-      const open = (opts._jawOpen || 0) * 3;
-      ctx.fillRect(sz * 0.48, headY + 2 + open * 0.3, 5, 1.5 + open);
+      const open = (opts._jawOpen || 0) * 4;
+      ctx.fillRect(sz * 0.52, headY + 3 + open * 0.3, 7, 2 + open);
     }
-    drawEye(ctx, sz * 0.42, headY - sz * 0.16, def.eyeColor, lookX, lookY);
+    drawEye(ctx, sz * 0.42, headY - sz * 0.16, def.eyeColor, lookX, lookY, Math.max(1.8, sz * 0.035));
   }
 
   function drawAlligator(ctx, def, sz, opts, lookX, lookY, headY) {
-    // Thick tapering tail
+    // Thick tapering tail with ridges
     ctx.fillStyle = def.bodyColor;
     ctx.beginPath();
-    ctx.moveTo(-sz * 0.3, headY);
-    ctx.lineTo(-sz * 0.9, headY + sz * 0.05);
-    ctx.lineTo(-sz * 0.3, headY + sz * 0.18);
+    ctx.moveTo(-sz * 0.28, headY - sz * 0.04);
+    ctx.quadraticCurveTo(-sz * 0.7, headY - sz * 0.02, -sz * 0.95, headY + sz * 0.06);
+    ctx.quadraticCurveTo(-sz * 0.7, headY + sz * 0.16, -sz * 0.28, headY + sz * 0.18);
     ctx.fill();
+    // Tail scutes
+    ctx.fillStyle = def.scaleColor || '#3a6a3a';
+    for (let i = 0; i < 4; i++) {
+      const tx = -sz * 0.4 - i * sz * 0.12;
+      ctx.beginPath();
+      ctx.moveTo(tx, headY - sz * 0.02);
+      ctx.lineTo(tx - sz * 0.04, headY - sz * 0.1);
+      ctx.lineTo(tx + sz * 0.04, headY - sz * 0.02);
+      ctx.fill();
+    }
     // Long flat body
+    ctx.fillStyle = def.bodyColor;
     ctx.beginPath();
-    ctx.ellipse(0, headY + 1, sz * 0.5, sz * 0.2, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, headY + 1, sz * 0.52, sz * 0.22, 0, 0, Math.PI * 2);
     ctx.fill();
+    // Scale rows
+    ctx.strokeStyle = def.bodyShade || '#1a3e1a';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 5; i++) {
+      ctx.beginPath();
+      ctx.ellipse(-sz * 0.15 + i * sz * 0.12, headY - sz * 0.02, sz * 0.05, sz * 0.04, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
     // Belly
     ctx.fillStyle = def.bellyColor;
     ctx.beginPath();
-    ctx.ellipse(sz * 0.05, headY + 3, sz * 0.3, sz * 0.08, 0, 0, Math.PI * 2);
+    ctx.ellipse(sz * 0.05, headY + sz * 0.08, sz * 0.32, sz * 0.09, 0, 0, Math.PI * 2);
     ctx.fill();
-    // Head + open jaw
-    ctx.fillStyle = def.jawColor;
+    // Short legs
+    ctx.fillStyle = def.bodyShade || def.bodyColor;
+    const feet = [
+      [-sz * 0.2, sz * 0.2],
+      [sz * 0.15, sz * 0.2],
+      [-sz * 0.05, sz * 0.18],
+      [sz * 0.28, sz * 0.18],
+    ];
+    for (let i = 0; i < feet.length; i++) {
+      ctx.beginPath();
+      ctx.ellipse(feet[i][0], headY + feet[i][1], sz * 0.1, sz * 0.06, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // Long snout + open jaw
     const jaw = opts._jawOpen != null ? opts._jawOpen : 0.3;
+    ctx.fillStyle = def.jawColor;
     ctx.beginPath();
-    ctx.ellipse(sz * 0.45, headY - jaw, sz * 0.28, sz * 0.1, 0, 0, Math.PI * 2);
+    ctx.ellipse(sz * 0.48, headY - jaw * sz * 0.08, sz * 0.32, sz * 0.1, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = def.bodyColor;
     ctx.beginPath();
-    ctx.ellipse(sz * 0.45, headY + jaw * 1.5, sz * 0.28, sz * 0.08, 0, 0, Math.PI * 2);
+    ctx.ellipse(sz * 0.48, headY + jaw * sz * 0.12, sz * 0.32, sz * 0.09, 0, 0, Math.PI * 2);
     ctx.fill();
-    // Teeth hint
-    ctx.fillStyle = '#e8e0d0';
-    ctx.fillRect(sz * 0.5, headY, 2, 1.5);
-    ctx.fillRect(sz * 0.58, headY, 2, 1.5);
-    drawEye(ctx, sz * 0.4, headY - sz * 0.12, def.eyeColor, lookX, lookY);
+    // Teeth
+    ctx.fillStyle = def.toothColor || '#f0ece4';
+    for (let i = 0; i < 4; i++) {
+      ctx.fillRect(sz * 0.4 + i * sz * 0.08, headY, Math.max(1.5, sz * 0.025), Math.max(2, sz * 0.04));
+    }
+    // Raised eye ridge
+    ctx.fillStyle = def.scaleColor || '#3a6a3a';
+    ctx.beginPath();
+    ctx.ellipse(sz * 0.28, headY - sz * 0.12, sz * 0.08, sz * 0.06, 0, 0, Math.PI * 2);
+    ctx.fill();
+    drawEye(ctx, sz * 0.3, headY - sz * 0.14, def.eyeColor, lookX, lookY, Math.max(1.6, sz * 0.035));
     // Water ripple when in water
     if (opts.inWater) {
-      ctx.strokeStyle = 'rgba(180,220,255,0.35)';
-      ctx.lineWidth = 1;
-      const r = sz * 0.55 + (opts.time % 1.5) * 4;
+      ctx.strokeStyle = 'rgba(180,220,255,0.4)';
+      ctx.lineWidth = 1.4;
+      const r = sz * 0.6 + ((opts.time || 0) % 1.5) * 6;
       ctx.beginPath();
-      ctx.ellipse(0, sz * 0.25, r, r * 0.35, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, sz * 0.28, r, r * 0.35, 0, 0, Math.PI * 2);
       ctx.stroke();
     }
   }
