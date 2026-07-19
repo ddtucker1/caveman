@@ -37,7 +37,7 @@ const {
   EXTINCTION_REPOPULATE_DELAY_TICKS,
 } = Wildborn.ecosystem;
 const { AI_STATE, HERBIVORE_SPECIES, PREDATOR_SPECIES } = Wildborn.animal;
-const { consumePlant, createPlant, updatePlant, RESPAWN_DELAY_TICKS, RESPAWN_CALORIE_RATIO } =
+const { consumePlant, createPlant, updatePlant, RESPAWN_DELAY_TICKS } =
   Wildborn.plant;
 const { createSpatialGrid } = Wildborn.spatial;
 
@@ -156,10 +156,10 @@ function assert(cond, msg) {
 // --- Unit: plant consume / respawn ---
 {
   const p = createPlant('grass', 0, 0);
-  assert(p.calories === 10, 'plant starts with 10 calories');
-  const taken = consumePlant(p, 100);
-  assert(taken === 10 && !p.alive, 'consumePlant depletes and kills plant (stays in memory)');
-  assert(p.growthPaused === true, 'eating pauses plant growth');
+  assert(p.calories === p.maxCalories, 'plant starts fully grown at max calories');
+  assert(p.size === 12, 'grass visual size is doubled (12)');
+  const taken = consumePlant(p, 200);
+  assert(taken === 150 && !p.alive, 'consumePlant depletes and kills plant (stays in memory)');
   assert(p.respawnTimer === RESPAWN_DELAY_TICKS, 'respawn timer starts at 2765s (5530 ticks)');
   assert(RESPAWN_DELAY_TICKS === 5530, 'RESPAWN_DELAY_TICKS is 5530');
   assert(Wildborn.plant.RESPAWN_DELAY_SECONDS === 2765, 'RESPAWN_DELAY_SECONDS is 2765');
@@ -167,69 +167,57 @@ function assert(cond, msg) {
   p.respawnTimer = 1;
   updatePlant(p, () => ({ x: 50, y: 50 }));
   assert(p.alive && p.x === 50, 'plant teleports on respawn');
-  assert(p.growthPaused === false, 'growth resumes after respawn');
   assert(
-    p.calories === p.maxCalories * RESPAWN_CALORIE_RATIO,
-    'plant respawns at 50% max calories (' + p.calories + ')'
+    p.calories === p.maxCalories,
+    'plant respawns at full max calories (' + p.calories + ')'
   );
 }
 
-// --- Unit: growth pauses once eating starts ---
+// --- Unit: plants do not grow ---
 {
   const p = createPlant('grass', 0, 0);
   p.calories = 20;
-  Wildborn.plant.pauseGrowth(p);
   updatePlant(p, null);
-  assert(p.calories === 20, 'paused plant does not grow (' + p.calories + ')');
-  // Without pause, same plant would grow
-  p.growthPaused = false;
-  updatePlant(p, null);
-  assert(p.calories === 22.5, 'unpaused plant grows normally');
+  assert(p.calories === 20, 'alive plant does not grow (' + p.calories + ')');
+  assert(!Wildborn.plant.pauseGrowth, 'growth pause API removed');
+  assert(p.growthPerTick == null, 'growthPerTick removed from plants');
+  assert(p.growthPaused == null, 'growthPaused removed from plants');
 }
 
-// --- Unit: plant growth / calorie density ---
+// --- Unit: plant max calories / doubled sizes ---
 {
   const p = createPlant('grass', 0, 0);
   assert(p.maxCalories === 150, 'grass max calories is 150');
-  assert(p.growthPerTick === 2.5, 'grass grows 5× faster (2.5/tick)');
-  p.calories = 20;
-  updatePlant(p, null);
-  assert(p.calories === 22.5, 'plant grows on land without grass restriction');
+  assert(p.calories === 150, 'grass spawns at full calories');
   const bush = createPlant('berry_bush', 0, 0);
-  assert(bush.maxCalories === 250, 'berry bush max is 250');
+  assert(bush.maxCalories === 250 && bush.size === 20, 'berry bush max 250, size 20');
   const tree = createPlant('fruit_tree', 0, 0);
-  assert(tree.maxCalories === 2000, 'fruit tree max is 2000');
+  assert(tree.maxCalories === 2000 && tree.size === 28, 'fruit tree max 2000, size 28');
   const mush = createPlant('mushroom', 0, 0);
-  assert(mush.maxCalories === 200, 'mushroom max is 200');
+  assert(mush.maxCalories === 200 && mush.size === 14, 'mushroom max 200, size 14');
   const cactus = createPlant('cactus', 0, 0);
-  assert(cactus.maxCalories === 175, 'cactus max is 175');
+  assert(cactus.maxCalories === 175 && cactus.size === 18, 'cactus max 175, size 18');
 }
 
-// --- Unit: eat rate / sight / water speed ---
+// --- Unit: eat rate / sight / water speed / metabolism ---
 {
   assert(Wildborn.animal.EAT_RATE_PER_SEC === 5, 'plant eat rate is 5 cal/sec/animal');
   assert(
-    Wildborn.animal.PREDATOR_CALORIE_BURN_PER_SEC === 0.1,
-    'predator base burn is 0.1 cal/sec (1 every 10s)'
+    Wildborn.animal.HERBIVORE_CALORIE_BURN_INTERVAL_SEC === 12,
+    'herbivores burn 1 calorie every 12 seconds'
   );
   assert(
-    Wildborn.animal.PREDATOR_CALORIE_BURN_MULT === 1.5,
-    'animal eaters burn calories at 150% rate (50% faster)'
-  );
-  assert(
-    Wildborn.animal.HERBIVORE_CALORIE_BURN_MULT === 0.8,
-    'herbivores burn calories at 80% rate (20% slower)'
-  );
-  assert(
-    Wildborn.animal.OMNIVORE_CALORIE_BURN_MULT === 1.3,
-    'omnivores burn calories at 130% rate (30% faster)'
+    Wildborn.animal.PREDATOR_CALORIE_BURN_INTERVAL_SEC === 8,
+    'predators burn 1 calorie every 8 seconds'
   );
   assert(Wildborn.animal.EAT_RANGE === 20, 'eat range is 20px');
   assert(Wildborn.animal.PLANT_SIGHT_TILES === 25, 'herbivore plant sight is 25 tiles');
   assert(Wildborn.animal.PLANT_SIGHT_RANGE === 800, 'plant sight is 25 tiles (800px)');
-  assert(Wildborn.animal.OMNIVORE_SIGHT_TILES === 20, 'omnivore food hunt sight is 20 tiles');
-  assert(Wildborn.animal.OMNIVORE_SIGHT_RANGE === 640, 'omnivore sight is 20 tiles (640px)');
-  assert(Wildborn.animal.FOOD_DETECT_RANGE === 256, 'predator food detect stays 8 tiles (256px)');
+  assert(Wildborn.animal.PREDATOR_SIGHT_TILES === 20, 'predator sight is 20 tiles');
+  assert(Wildborn.animal.PREDATOR_SIGHT_RANGE === 640, 'predator sight is 20 tiles (640px)');
+  assert(Wildborn.animal.PREDATOR_HUNT_RATIO === 0.5, 'predators hunt at ≤50% calories');
+  assert(Wildborn.animal.PREDATOR_RIVAL_HUNT_RATIO === 0.25, 'predators attack rivals at ≤25%');
+  assert(Wildborn.animal.HUNGER_RETURN_RATIO === 0.7, 'leave search at ≥70% calories');
   assert(Wildborn.animal.HERBIVORE_LAND_SPEED === 30, 'herbivore land speed is 30');
   assert(Wildborn.animal.PREDATOR_LAND_SPEED === 36, 'predator land speed is 36');
   assert(
@@ -260,89 +248,65 @@ function assert(cond, msg) {
   assert(rabbit.diet === 'herbivore' && rabbit.maxCalories === 60, 'rabbit herbivore stats');
   assert(rabbit.stamina == null && rabbit.maxStamina == null, 'animals have no stamina');
   assert(rabbit.baseSpeed === Wildborn.animal.HERBIVORE_LAND_SPEED, 'herbivores use land speed 30');
+  assert(rabbit.caloriesNeededPerDay == null, 'need/day removed');
+  assert(rabbit.maxGroupSize == null && rabbit.groupId == null, 'group stats removed');
+  assert(rabbit.defense == null, 'defense stat removed');
   const wolf = Wildborn.animal.createAnimal('wolf', 0, 0);
   assert(wolf.diet === 'predator' && wolf.attackPower === 22, 'wolf predator stats');
-  assert(wolf.defense === 'none', 'predators default to no flee defense');
   assert(wolf.special == null, 'animals have no special abilities');
   const bear = Wildborn.animal.createAnimal('bear', 0, 0);
-  assert(bear.diet === 'omnivore', 'bear is omnivore');
-  assert(bear.baseSpeed === Wildborn.animal.PREDATOR_LAND_SPEED, 'omnivores use predator land speed 36');
-  assert(bear.defense === 'none', 'omnivore predators also never flee by default');
-  assert(Wildborn.animal.OMNIVORE_HUNT_RATIO === 0.5, 'omnivores hunt at 50% calories');
-  assert(
-    Wildborn.animal.OMNIVORE_ATTACK_OTHER_SPECIES_RATIO === 0.25,
-    'omnivores attack other omnivore species at 25% calories'
-  );
-  assert(
-    Wildborn.animal.OMNIVORE_ATTACK_OWN_SPECIES_RATIO === 0.1,
-    'omnivores attack own species at 10% calories'
-  );
-  assert(
-    Wildborn.animal.OMNIVORE_BREED_COOLDOWN === Wildborn.animal.BREED_COOLDOWN * 2,
-    'omnivore breed cooldown is double base (2400 ticks)'
-  );
+  assert(bear.diet === 'predator', 'bear is strictly a carnivore predator');
+  assert(bear.baseSpeed === Wildborn.animal.PREDATOR_LAND_SPEED, 'bear uses predator land speed 36');
+  assert(bear.attackStyle === 'swipe', 'bear keeps attack style');
+  assert(Wildborn.animal.PREDATOR_BREED_COOLDOWN === Wildborn.animal.BREED_COOLDOWN * 2, 'predator breed cooldown is 20 min');
   assert(wolf.state === 'ROAM', 'predators spawn in ROAM state');
   assert(wolf.spawnX === 0 && wolf.spawnY === 0, 'predator records spawn territory point');
   const cub = Wildborn.animal.createAnimal('deer', 0, 0, { isOffspring: true });
   assert(cub.isAdult && cub.health === cub.maxHealth, 'offspring born as full-health adults');
-  assert(cub.growth === 1 && cub.size === cub.baseSize, 'offspring spawn at full adult size');
+  assert(cub.size === cub.baseSize, 'offspring spawn at full adult size');
   assert(cub.breedingCooldown === Wildborn.animal.BREED_COOLDOWN, 'offspring start on breed cooldown');
   const bearCub = Wildborn.animal.createAnimal('bear', 0, 0, { isOffspring: true });
   assert(
-    bearCub.breedingCooldown === Wildborn.animal.OMNIVORE_BREED_COOLDOWN,
-    'omnivore offspring start on doubled breed cooldown'
+    bearCub.breedingCooldown === Wildborn.animal.PREDATOR_BREED_COOLDOWN,
+    'predator offspring start on 20 min breed cooldown'
   );
-  assert(!HERBIVORE_SPECIES.chicken, 'chicken species removed');
+  assert(!HERBIVORE_SPECIES.cow && !HERBIVORE_SPECIES.raccoon, 'cow and raccoon removed');
+  assert(!PREDATOR_SPECIES.lion && !PREDATOR_SPECIES.panther, 'lion and panther removed');
+  assert(HERBIVORE_SPECIES.rabbit && HERBIVORE_SPECIES.deer && HERBIVORE_SPECIES.bison, 'kept herbivores present');
+  assert(HERBIVORE_SPECIES.ostrich && HERBIVORE_SPECIES.turtle, 'ostrich and turtle present');
+  assert(PREDATOR_SPECIES.wolf && PREDATOR_SPECIES.bear && PREDATOR_SPECIES.alligator, 'kept predators present');
   assert(!Wildborn.animal.AI_STATE.SEEK_MATE && !Wildborn.animal.AI_STATE.BREEDING, 'mate-seeking states removed');
 }
 
-// --- Unit: animal eater ×1.5 / omnivore ×1.3 / herbivore ÷10 ---
+// --- Unit: metabolism — herbivores 1/12s, predators 1/8s ---
 {
   const tickSec = Wildborn.config.ecosystemTickSeconds || 0.5;
-  const expectedPredBase = Wildborn.animal.PREDATOR_CALORIE_BURN_PER_SEC * tickSec;
-  const expectedPred =
-    expectedPredBase * Wildborn.animal.PREDATOR_CALORIE_BURN_MULT;
-  const expectedOmni =
-    expectedPredBase * Wildborn.animal.OMNIVORE_CALORIE_BURN_MULT;
+  const expectedPred = tickSec / Wildborn.animal.PREDATOR_CALORIE_BURN_INTERVAL_SEC;
+  const expectedHerb = tickSec / Wildborn.animal.HERBIVORE_CALORIE_BURN_INTERVAL_SEC;
   const predIds = Object.keys(PREDATOR_SPECIES);
   for (let i = 0; i < predIds.length; i++) {
     const a = Wildborn.animal.createAnimal(predIds[i], 0, 0);
     const burn = Wildborn.animal.calorieBurnPerTick(a);
-    if (a.diet === 'omnivore') {
-      assert(
-        Math.abs(burn - expectedOmni) < 0.0001,
-        predIds[i] + ' omnivore burn is 30% faster (' + burn + ' /tick, expect ' + expectedOmni + ')'
-      );
-    } else {
-      assert(
-        Math.abs(burn - expectedPred) < 0.0001,
-        predIds[i] +
-          ' animal eater burn is 50% faster (' +
-          burn +
-          ' /tick, expect ' +
-          expectedPred +
-          ')'
-      );
-    }
+    assert(
+      Math.abs(burn - expectedPred) < 0.0001,
+      predIds[i] + ' predator burn is 1/8 cal/s (' + burn + ' /tick, expect ' + expectedPred + ')'
+    );
   }
   const rabbit = Wildborn.animal.createAnimal('rabbit', 0, 0);
   const herbBurn = Wildborn.animal.calorieBurnPerTick(rabbit);
-  // Rabbit: 30/120/10 = 0.025 → floored to 0.1 × 0.8 = 0.08 (20% slower)
-  const expectedHerb =
-    0.1 * Wildborn.animal.HERBIVORE_CALORIE_BURN_MULT;
   assert(
     Math.abs(herbBurn - expectedHerb) < 0.0001,
-    'herbivore burn is 20% slower (' + herbBurn + ', expect ' + expectedHerb + ')'
+    'herbivore burn is 1/12 cal/s (' + herbBurn + ', expect ' + expectedHerb + ')'
   );
   assert(
     !PREDATOR_SPECIES[rabbit.species],
-    'rabbit is not on the flat predator burn path'
+    'rabbit is not on the predator burn path'
   );
   const bear = Wildborn.animal.createAnimal('bear', 0, 0);
   const bearBurn = Wildborn.animal.calorieBurnPerTick(bear);
   assert(
-    Math.abs(bearBurn - expectedOmni) < 0.0001,
-    'bear omnivore burn is 30% faster (' + bearBurn + ', expect ' + expectedOmni + ')'
+    Math.abs(bearBurn - expectedPred) < 0.0001,
+    'bear predator burn matches 1/8 cal/s (' + bearBurn + ', expect ' + expectedPred + ')'
   );
   const wolf = Wildborn.animal.createAnimal('wolf', 0, 0);
   assert(Wildborn.animal.SPEED.predator === 36, 'predator SPEED alias is 36');
@@ -565,38 +529,27 @@ function assert(cond, msg) {
     );
   }
 
-  // Herbivore killed by predator → corpse offers 100% of full calorie level
+  // Herbivore killed by predator → corpse offers calories held at death
   {
     const rabbit = Wildborn.animal.createAnimal('rabbit', 100, 100);
     const wolf = Wildborn.animal.createAnimal('wolf', 100, 100);
-    rabbit.calories = 12; // current calories ignored — yield is full capacity
+    rabbit.calories = 12;
     Wildborn.animal.killAnimal(rabbit, wolf);
     assert(rabbit.state === 'DEAD' && !rabbit.alive, 'killed herbivore becomes a corpse');
     assert(
-      rabbit.corpseCalories === rabbit.maxCalories,
-      'corpse offers 100% of maxCalories (' + rabbit.corpseCalories + '/' + rabbit.maxCalories + ')'
+      rabbit.corpseCalories === 12,
+      'corpse offers calories at death (' + rabbit.corpseCalories + ')'
     );
     assert(wolf.state === 'EATING' && wolf.target === rabbit, 'killer starts eating the corpse');
-    assert(
-      Wildborn.animal.HERBIVORE_SPECIES.rabbit.corpseYield === 1,
-      'rabbit corpseYield is 1'
-    );
-    assert(
-      Wildborn.animal.HERBIVORE_SPECIES.bison.corpseYield === 1,
-      'bison corpseYield is 1'
-    );
-    assert(
-      Wildborn.animal.HERBIVORE_SPECIES.turtle.corpseYield === 1,
-      'turtle corpseYield is 1'
-    );
   }
 
-  // Predator keeps eating corpse past 60% / 95% until 100% full
+  // Predator keeps eating corpse past 70% until 100% full
   {
     const corpse = Wildborn.animal.createAnimal('deer', 100, 100);
+    corpse.calories = corpse.maxCalories;
     const wolf = Wildborn.animal.createAnimal('wolf', 100, 100);
     Wildborn.animal.killAnimal(corpse, null);
-    assert(corpse.corpseCalories === corpse.maxCalories, 'deer corpse is full calorie yield');
+    assert(corpse.corpseCalories === corpse.maxCalories, 'deer corpse yields calories at death');
     wolf.state = 'EATING';
     wolf.target = corpse;
     wolf._hungerSearch = true;
@@ -604,7 +557,7 @@ function assert(cond, msg) {
     wolf.calories = wolf.maxCalories * 0.55;
     const before = wolf.calories;
     Wildborn.animal.updateAnimal(wolf, 1.0, corpseEatCtx());
-    assert(wolf.state === 'EATING', 'keeps EATING corpse past 55% (no 60% bailout)');
+    assert(wolf.state === 'EATING', 'keeps EATING corpse past 55% (no mid-meal bailout)');
     assert(wolf.target === corpse, 'stays locked on corpse past hunger-return band');
     assert(wolf.calories > before, 'continues transferring corpse calories while locked in');
   }
@@ -612,6 +565,7 @@ function assert(cond, msg) {
   // Stops at 100% full even if corpse remains
   {
     const corpse = Wildborn.animal.createAnimal('deer', 100, 100);
+    corpse.calories = corpse.maxCalories;
     const wolf = Wildborn.animal.createAnimal('wolf', 100, 100);
     Wildborn.animal.killAnimal(corpse, null);
     wolf.state = 'EATING';
@@ -627,6 +581,7 @@ function assert(cond, msg) {
   // Stops when corpse food runs out before full
   {
     const corpse = Wildborn.animal.createAnimal('rabbit', 100, 100);
+    corpse.calories = corpse.maxCalories;
     const wolf = Wildborn.animal.createAnimal('wolf', 100, 100);
     Wildborn.animal.killAnimal(corpse, null);
     corpse.corpseCalories = 1;
@@ -640,17 +595,18 @@ function assert(cond, msg) {
     assert(wolf.calories < wolf.maxCalories, 'wolf not yet full when food ran out');
   }
 
-  // Omnivore (bear) also eats corpse to 100%
+  // Bear (carnivore) also eats corpse to 100%
   {
-    const corpse = Wildborn.animal.createAnimal('cow', 100, 100);
+    const corpse = Wildborn.animal.createAnimal('bison', 100, 100);
+    corpse.calories = corpse.maxCalories;
     const bear = Wildborn.animal.createAnimal('bear', 100, 100);
     Wildborn.animal.killAnimal(corpse, null);
     bear.state = 'EATING';
     bear.target = corpse;
     bear.calories = bear.maxCalories - 0.5;
     Wildborn.animal.updateAnimal(bear, 1.0, corpseEatCtx());
-    assert(bear.calories >= bear.maxCalories, 'omnivore fills to 100% from corpse');
-    assert(bear.state !== 'EATING', 'omnivore leaves EATING once fully full');
+    assert(bear.calories >= bear.maxCalories, 'bear fills to 100% from corpse');
+    assert(bear.state !== 'EATING', 'bear leaves EATING once fully full');
   }
 
   // Herbivores never eat corpses — plants only
@@ -683,7 +639,7 @@ function assert(cond, msg) {
       rabbit.target === plant || rabbit.state === 'SEEK_FOOD',
       'hungry herbivore seeks plants (or keeps exploring), never dead animals'
     );
-    assert(corpse.corpseCalories === corpse.maxCalories, 'corpse untouched by herbivore');
+    assert(corpse.corpseCalories > 0, 'corpse untouched by herbivore');
   }
 
   // Even if already locked on a corpse, herbivores abandon it
@@ -702,14 +658,14 @@ function assert(cond, msg) {
   }
 }
 
-// --- Unit: herbivores flee from omnivores on sight ---
+// --- Unit: herbivores flee from bears on sight ---
 {
   const deer = Wildborn.animal.createAnimal('deer', 100, 100);
   const bear = Wildborn.animal.createAnimal('bear', 140, 100);
   deer.state = 'IDLE';
   deer.calories = deer.maxCalories * 0.8;
   const fleeCtx = {
-    rng: createRng('flee-omnivore'),
+    rng: createRng('flee-bear'),
     tickSeconds: 0.5,
     isWater: () => false,
     findNearestAnimal: (x, y, radius, pred) => {
@@ -720,8 +676,8 @@ function assert(cond, msg) {
     queryAnimals: () => [bear],
   };
   Wildborn.animal.updateAnimal(deer, 0.1, fleeCtx);
-  assert(deer.state === 'FLEE', 'idle herbivore flees when it sees an omnivore');
-  assert(deer.fleeFrom === bear, 'flee target is the omnivore');
+  assert(deer.state === 'FLEE', 'idle herbivore flees when it sees a bear');
+  assert(deer.fleeFrom === bear, 'flee target is the bear');
 
   // Also flee while hunger-searching for plants
   const rabbit = Wildborn.animal.createAnimal('rabbit', 100, 100);
@@ -731,8 +687,8 @@ function assert(cond, msg) {
   rabbit._exploreGoal = { x: 5000, y: 100 };
   rabbit._exploreTimer = 30;
   Wildborn.animal.updateAnimal(rabbit, 0.1, fleeCtx);
-  assert(rabbit.state === 'FLEE', 'hunger-searching herbivore flees from omnivore on sight');
-  assert(rabbit.fleeFrom === bear, 'seek-food flee target is the omnivore');
+  assert(rabbit.state === 'FLEE', 'hunger-searching herbivore flees from bear on sight');
+  assert(rabbit.fleeFrom === bear, 'seek-food flee target is the bear');
 }
 
 // --- Unit: diet land speeds / no stamina ---
@@ -755,7 +711,7 @@ function assert(cond, msg) {
     );
   }
   const bear = Wildborn.animal.createAnimal('bear', 0, 0);
-  assert(bear.baseSpeed === Wildborn.animal.PREDATOR_LAND_SPEED, 'bear omnivore land speed is 36');
+  assert(bear.baseSpeed === Wildborn.animal.PREDATOR_LAND_SPEED, 'bear predator land speed is 36');
   assert(Wildborn.animal.STAMINA_MAX == null, 'stamina constants removed');
 }
 
@@ -794,7 +750,7 @@ function assert(cond, msg) {
 // --- Unit: hunger search at ≤50% ---
 {
   assert(Wildborn.animal.HUNGER_SEEK_RATIO === 0.5, 'hunger search trigger is 50%');
-  assert(Wildborn.animal.HUNGER_RETURN_RATIO === 0.6, 'hunger search returns at 60%');
+  assert(Wildborn.animal.HUNGER_RETURN_RATIO === 0.7, 'hunger search returns at 70%');
   assert(
     Wildborn.animal.HUNGER_EXPLORE_GOAL_MIN >= 20,
     'hunger explore commits to one direction for longer periods'
@@ -827,8 +783,8 @@ function assert(cond, msg) {
   wolfSearch.state = 'ROAM';
   Wildborn.animal.updateAnimal(wolfSearch, 0.1, ctx);
   assert(
-    wolfSearch.state === 'SEEK_FOOD' && wolfSearch._hungerSearch && !wolfSearch._hunting,
-    'predator hunger-searches at ≤50% before hunt mode'
+    wolfSearch.state === 'SEEK_PREY' && wolfSearch._hunting,
+    'predator hunts at ≤50% calories'
   );
 
   // Distant map exploration at normal base speed
@@ -1548,46 +1504,44 @@ function assert(cond, msg) {
   // Well-fed: stay roaming
   wolf.calories = wolf.maxCalories * 0.9;
   Wildborn.animal.updateAnimal(wolf, 0.1, ctx);
-  assert(wolf.state === 'ROAM', 'predator stays ROAM above 30% calories');
+  assert(wolf.state === 'ROAM', 'predator stays ROAM above 50% calories');
 
   // Drop to hunt threshold
-  wolf.calories = wolf.maxCalories * 0.3;
+  wolf.calories = wolf.maxCalories * 0.5;
   Wildborn.animal.updateAnimal(wolf, 0.1, ctx);
-  assert(wolf.state === 'SEEK_PREY' && wolf._hunting, 'predator enters SEEK_PREY at ≤30%');
+  assert(wolf.state === 'SEEK_PREY' && wolf._hunting, 'predator enters SEEK_PREY at ≤50%');
 
-  // Satiate to 80%
-  wolf.calories = wolf.maxCalories * 0.85;
+  // Satiate to 70%
+  wolf.calories = wolf.maxCalories * 0.75;
   wolf.state = 'SEEK_PREY';
   wolf._hunting = true;
   Wildborn.animal.updateAnimal(wolf, 0.1, ctx);
-  assert(wolf.state === 'ROAM' && !wolf._hunting, 'predator returns to ROAM at ≥80%');
+  assert(wolf.state === 'ROAM' && !wolf._hunting, 'predator returns to ROAM at ≥70%');
 
-  // Omnivores: no 30% hunt gate — hunt prey at ≤50% with expanded search
+  // Bear (carnivore) also hunts at ≤50% with 20-tile sight
   const bear = Wildborn.animal.createAnimal('bear', 100, 100);
   bear.calories = bear.maxCalories * 0.5;
   bear.state = 'ROAM';
   Wildborn.animal.updateAnimal(bear, 0.1, ctx);
-  assert(bear.state === 'SEEK_PREY' && bear._hunting, 'omnivore enters SEEK_PREY at ≤50%');
+  assert(bear.state === 'SEEK_PREY' && bear._hunting, 'bear enters SEEK_PREY at ≤50%');
   assert(
-    bear._searchRadius >= Wildborn.animal.OMNIVORE_SIGHT_RANGE,
-    'omnivore starts hunt search at 20-tile sight range'
+    bear._searchRadius >= Wildborn.animal.PREDATOR_SIGHT_RANGE,
+    'predator starts hunt search at 20-tile sight range'
   );
   const prevRadius = bear._searchRadius;
   Wildborn.animal.updateAnimal(bear, 1, ctx);
-  assert(bear._searchRadius > prevRadius, 'omnivore expands prey search across the map');
+  assert(bear._searchRadius > prevRadius, 'predator expands prey search across the map');
 }
 
-// --- Unit: omnivore attacks other/own species by calorie desperation ---
+// --- Unit: predators attack other predators at ≤25% calories ---
 {
   const bear = Wildborn.animal.createAnimal('bear', 100, 100);
   const otherBear = Wildborn.animal.createAnimal('bear', 130, 100);
-  // Stand-in for a second omnivore species (only bear exists today).
-  const otherOmnivore = Wildborn.animal.createAnimal('wolf', 160, 100);
-  otherOmnivore.diet = 'omnivore';
+  const wolf = Wildborn.animal.createAnimal('wolf', 160, 100);
 
   function makeCtx(candidates) {
     return {
-      rng: createRng('omnivore-rival'),
+      rng: createRng('predator-rival'),
       tickSeconds: 0.5,
       isWater: () => false,
       findNearestPlant: () => null,
@@ -1609,53 +1563,41 @@ function assert(cond, msg) {
     };
   }
 
-  // At 30%: hunting herbivores only — not other omnivores yet
+  // At 30%: hunting herbivores only — not other predators yet
   bear.calories = bear.maxCalories * 0.3;
   bear.state = 'SEEK_PREY';
   bear._hunting = true;
   bear.target = null;
-  Wildborn.animal.updateAnimal(bear, 0.1, makeCtx([otherBear, otherOmnivore]));
+  Wildborn.animal.updateAnimal(bear, 0.1, makeCtx([otherBear, wolf]));
   assert(
-    bear.target !== otherBear && bear.target !== otherOmnivore,
-    'omnivore above 25% does not target other omnivores'
+    bear.target !== otherBear && bear.target !== wolf,
+    'predator above 25% does not target other predators'
   );
 
-  // At 25%: attack other omnivore species, but not own species
+  // At 25%: attack other predators (any species, including own)
   bear.calories = bear.maxCalories * 0.25;
   bear.target = null;
-  Wildborn.animal.updateAnimal(bear, 0.1, makeCtx([otherBear, otherOmnivore]));
-  assert(bear.target === otherOmnivore, 'omnivore at ≤25% targets other omnivore species');
-  assert(bear.target !== otherBear, 'omnivore at 25% does not target own species');
-
-  // Own species alone at 25% is ignored
-  bear.target = null;
-  Wildborn.animal.updateAnimal(bear, 0.1, makeCtx([otherBear]));
-  assert(bear.target !== otherBear, 'omnivore at 25% ignores own species when alone');
-
-  // At 10%: attack own species
-  bear.calories = bear.maxCalories * 0.1;
-  bear.target = null;
-  Wildborn.animal.updateAnimal(bear, 0.1, makeCtx([otherBear]));
-  assert(bear.target === otherBear, 'omnivore at ≤10% targets own species for food');
-
-  // At 10% with both present: prefers other species (checked first)
-  bear.target = null;
-  Wildborn.animal.updateAnimal(bear, 0.1, makeCtx([otherBear, otherOmnivore]));
+  Wildborn.animal.updateAnimal(bear, 0.1, makeCtx([otherBear, wolf]));
   assert(
-    bear.target === otherOmnivore,
-    'omnivore at ≤10% still prefers other omnivore species when available'
+    bear.target === otherBear || bear.target === wolf,
+    'predator at ≤25% targets another predator'
   );
 
-  // Close-range attack actually lands on own-species rival at 10%
+  // Own species alone at 25% is also valid
+  bear.target = null;
+  Wildborn.animal.updateAnimal(bear, 0.1, makeCtx([otherBear]));
+  assert(bear.target === otherBear, 'predator at ≤25% targets own species');
+
+  // Close-range attack actually lands on own-species rival at 25%
   otherBear.x = bear.x + 10;
   otherBear.y = bear.y;
   const hpBefore = otherBear.health;
-  bear.calories = bear.maxCalories * 0.1;
+  bear.calories = bear.maxCalories * 0.25;
   bear.target = null;
   bear.attackCooldown = 0;
   Wildborn.animal.updateAnimal(bear, 0.1, makeCtx([otherBear]));
-  assert(bear.target === otherBear, 'starving omnivore locks onto nearby own-species rival');
-  assert(otherBear.health < hpBefore, 'omnivore at ≤10% attacks own species');
+  assert(bear.target === otherBear, 'starving predator locks onto nearby own-species rival');
+  assert(otherBear.health < hpBefore, 'predator at ≤25% attacks own species');
 }
 
 // --- Unit: shape defs cover every species + renderShape is callable ---
@@ -1724,7 +1666,7 @@ function assert(cond, msg) {
       isAdult: true,
       id: 1,
     });
-    assert(calls > 0 && calls < 80, 'renderShape(' + id + ') draw ops=' + calls + ' (<80)');
+    assert(calls > 0 && calls < 120, 'renderShape(' + id + ') draw ops=' + calls + ' (<120)');
   }
 
   // JSON file stays in sync with inline defs for key fields
@@ -1781,8 +1723,8 @@ function assert(cond, msg) {
   const wolves = eco.animals.filter((a) => a.species === 'wolf');
   assert(wolves.every((w) => w.state === 'ROAM'), 'well-fed wolves start in ROAM');
 
-  const herbExpected = { rabbit: 10, deer: 8, cow: 6, raccoon: 5, bison: 4, ostrich: 3, turtle: 5 };
-  const predExpected = { wolf: 4, lion: 3, panther: 2, bear: 2, alligator: 3 };
+  const herbExpected = { rabbit: 10, deer: 8, bison: 4, ostrich: 3, turtle: 5 };
+  const predExpected = { wolf: 4, bear: 2, alligator: 3 };
 
   const counts = {};
   for (const a of eco.animals) {
@@ -1834,7 +1776,7 @@ function assert(cond, msg) {
   assert(kids[0].species === 'deer' && kids[0].isAdult, 'offspring is an adult deer');
   assert(kids[0].health === kids[0].maxHealth, 'offspring born at full health');
   assert(kids[0].x === deerA.x && kids[0].y === deerA.y, 'offspring spawns at parent location');
-  assert(kids[0].growth === 1 && kids[0].size === kids[0].baseSize, 'offspring starts at full size');
+  assert(kids[0].size === kids[0].baseSize, 'offspring starts at full size');
   assert(deerA.breedingCooldown === Wildborn.animal.BREED_COOLDOWN, 'breeding cooldown applied');
   assert(!Wildborn.animal.canBreed(deerA), 'parent cannot breed again until cooldown ends');
 
@@ -1842,16 +1784,16 @@ function assert(cond, msg) {
   const bearA = Wildborn.animal.createAnimal('bear', 120, 120);
   bearA.calories = bearA.maxCalories;
   bearA.breedingCooldown = 0;
-  assert(Wildborn.animal.canBreed(bearA), 'well-fed omnivore with cooldown 0 can breed');
+  assert(Wildborn.animal.canBreed(bearA), 'well-fed predator with cooldown 0 can breed');
   const bearKids = Wildborn.animal.breed(bearA);
-  assert(bearKids.length === 1, 'omnivore breed() yields exactly 1 offspring');
+  assert(bearKids.length === 1, 'predator breed() yields exactly 1 offspring');
   assert(
-    bearA.breedingCooldown === Wildborn.animal.OMNIVORE_BREED_COOLDOWN,
-    'omnivore parent gets doubled breeding cooldown'
+    bearA.breedingCooldown === Wildborn.animal.PREDATOR_BREED_COOLDOWN,
+    'predator parent gets 20 min breeding cooldown'
   );
   assert(
-    bearKids[0].breedingCooldown === Wildborn.animal.OMNIVORE_BREED_COOLDOWN,
-    'omnivore offspring starts on doubled breed cooldown'
+    bearKids[0].breedingCooldown === Wildborn.animal.PREDATOR_BREED_COOLDOWN,
+    'predator offspring starts on 20 min breed cooldown'
   );
 
   // Ecosystem asexual path: one fertile adult reproduces on the next tick without a mate
@@ -1890,13 +1832,13 @@ function assert(cond, msg) {
     origin: { x: MAP_PIXEL_SIZE / 2, y: MAP_PIXEL_SIZE / 2 },
   });
 
-  // Wipe panthers (leave corpses out of the array so ticks stay cheap)
+  // Wipe wolves (leave corpses out of the array so ticks stay cheap)
   for (let i = eco.animals.length - 1; i >= 0; i--) {
-    if (eco.animals[i].species === 'panther') eco.animals.splice(i, 1);
+    if (eco.animals[i].species === 'wolf') eco.animals.splice(i, 1);
   }
   assert(
-    eco.animals.every((a) => a.species !== 'panther'),
-    'panthers removed to simulate extinction'
+    eco.animals.every((a) => a.species !== 'wolf'),
+    'wolves removed to simulate extinction'
   );
 
   // Also drop every other animal so the 25-minute wait is a cheap empty tick loop
@@ -1905,14 +1847,14 @@ function assert(cond, msg) {
   for (let i = 0; i < EXTINCTION_REPOPULATE_DELAY_TICKS - 1; i++) {
     eco.update(0.5);
   }
-  let panthers = eco.animals.filter((a) => a.species === 'panther' && a.alive);
-  assert(panthers.length === 0, 'no panther respawn before 25 minutes');
+  let wolves = eco.animals.filter((a) => a.species === 'wolf' && a.alive);
+  assert(wolves.length === 0, 'no wolf respawn before 25 minutes');
 
   eco.update(0.5);
-  panthers = eco.animals.filter((a) => a.species === 'panther' && a.alive);
+  wolves = eco.animals.filter((a) => a.species === 'wolf' && a.alive);
   assert(
-    panthers.length === EXTINCTION_REPOPULATE_COUNT,
-    'exactly 4 panthers spawn after 25 minutes (' + panthers.length + ')'
+    wolves.length === EXTINCTION_REPOPULATE_COUNT,
+    'exactly 4 wolves spawn after 25 minutes (' + wolves.length + ')'
   );
 
   // Spot-check another wiped species also recovered
@@ -1924,8 +1866,8 @@ function assert(cond, msg) {
 
   // Positions should not all be identical (random locations)
   const unique = {};
-  for (let i = 0; i < panthers.length; i++) {
-    unique[Math.round(panthers[i].x) + ',' + Math.round(panthers[i].y)] = true;
+  for (let i = 0; i < wolves.length; i++) {
+    unique[Math.round(wolves[i].x) + ',' + Math.round(wolves[i].y)] = true;
   }
   assert(Object.keys(unique).length > 1, 'repopulated animals spawn at varied locations');
 }

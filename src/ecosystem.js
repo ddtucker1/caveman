@@ -5,7 +5,7 @@
 (function (global) {
   const Wildborn = (global.Wildborn = global.Wildborn || {});
   const { createSpatialGrid } = Wildborn.spatial;
-  const { createPlant, pickSpecies, updatePlant, relocateToLand } = Wildborn.plant;
+  const { createPlant, pickSpecies, updatePlant } = Wildborn.plant;
   const {
     createAnimal,
     updateAnimal,
@@ -20,8 +20,6 @@
   const INITIAL_HERBIVORES = {
     rabbit: 10,
     deer: 8,
-    cow: 6,
-    raccoon: 5,
     bison: 4,
     ostrich: 3,
     turtle: 5,
@@ -29,8 +27,6 @@
 
   const INITIAL_PREDATORS = {
     wolf: 4,
-    lion: 3,
-    panther: 2,
     bear: 2,
     alligator: 3,
   };
@@ -76,7 +72,6 @@
 
     let tickAccum = 0;
     let tickCount = 0;
-    let nextGroupId = 1;
     let splashCooldown = 0;
     /** speciesId → ticks remaining until extinction repopulation fires. */
     const extinctionTimers = {};
@@ -175,24 +170,6 @@
       return findWalkableSpot();
     }
 
-    /**
-     * Jitter a pack/herd member near a valid anchor without landing on
-     * trees, mountains, or (for land animals) water.
-     */
-    function jitterNearSpot(spot, range, allowWater) {
-      for (let i = 0; i < 12; i++) {
-        let x = spot.x + rng.range(-range, range);
-        let y = spot.y + rng.range(-range, range);
-        x = Math.max(TILE_SIZE, Math.min(mapPixelSize - TILE_SIZE, x));
-        y = Math.max(TILE_SIZE, Math.min(mapPixelSize - TILE_SIZE, y));
-        const tile = world.getTileAtPixel(x, y);
-        if (world.isSolid(tile)) continue;
-        if (!allowWater && world.isSlow(tile)) continue;
-        return { x: x, y: y };
-      }
-      return { x: spot.x, y: spot.y };
-    }
-
     /** Respawn: completely random land tile anywhere on the 400×400 map. */
     function findRespawnSpot() {
       return findRandomLandTile(800);
@@ -218,13 +195,7 @@
       const allowWater = speciesId === 'alligator' || !!def.aquatic;
       for (let i = 0; i < count; i++) {
         const spot = allowWater ? findWaterSpot() : findWalkableSpot();
-        const sex = speciesId === 'lion' ? (rng.chance(0.6) ? 'female' : 'male') : undefined;
-        animals.push(
-          createAnimal(speciesId, spot.x, spot.y, {
-            groupId: nextGroupId++,
-            sex: sex,
-          })
-        );
+        animals.push(createAnimal(speciesId, spot.x, spot.y));
       }
     }
 
@@ -284,53 +255,24 @@
         planted++;
       }
 
-      // Herbivores — assign group ids for herd species
+      // Herbivores — independent random land spawns
       for (const species in INITIAL_HERBIVORES) {
         const count = INITIAL_HERBIVORES[species];
         const def = HERBIVORE_SPECIES[species];
-        let groupId = 0;
-        let inGroup = 0;
         for (let i = 0; i < count; i++) {
-          if (inGroup === 0 || inGroup >= def.maxGroupSize) {
-            groupId = nextGroupId++;
-            inGroup = 0;
-          }
-          const spot = findWalkableSpot();
-          let x = spot.x;
-          let y = spot.y;
-          if (inGroup > 0 && def.maxGroupSize > 1) {
-            const jittered = jitterNearSpot(spot, 40, !!def.aquatic);
-            x = jittered.x;
-            y = jittered.y;
-          }
-          animals.push(createAnimal(species, x, y, { groupId: groupId }));
-          inGroup++;
+          const spot = def && def.aquatic ? findWaterSpot() : findWalkableSpot();
+          animals.push(createAnimal(species, spot.x, spot.y));
         }
       }
 
-      // Predators
+      // Predators — independent random spawns
       for (const species in INITIAL_PREDATORS) {
         const count = INITIAL_PREDATORS[species];
         const def = PREDATOR_SPECIES[species];
-        let groupId = 0;
-        let inGroup = 0;
+        const allowWater = species === 'alligator' || !!(def && def.aquatic);
         for (let i = 0; i < count; i++) {
-          if (inGroup === 0 || inGroup >= def.maxGroupSize) {
-            groupId = nextGroupId++;
-            inGroup = 0;
-          }
-          const allowWater = species === 'alligator' || !!def.aquatic;
           const spot = allowWater ? findWaterSpot() : findWalkableSpot();
-          let x = spot.x;
-          let y = spot.y;
-          if (inGroup > 0 && def.maxGroupSize > 1) {
-            const jittered = jitterNearSpot(spot, 50, allowWater);
-            x = jittered.x;
-            y = jittered.y;
-          }
-          const sex = species === 'lion' ? (rng.chance(0.6) ? 'female' : 'male') : undefined;
-          animals.push(createAnimal(species, x, y, { groupId: groupId, sex: sex }));
-          inGroup++;
+          animals.push(createAnimal(species, spot.x, spot.y));
         }
       }
     }
@@ -342,7 +284,7 @@
     function rebuildPlantGrid() {
       plantGrid.clear();
       for (let i = 0; i < plants.length; i++) {
-        // Only alive plants are food targets; dead ones stay in memory for sprouts
+        // Only alive plants are food targets; depleted ones wait off-map for respawn
         if (plants[i].alive) plantGrid.insert(plants[i]);
       }
     }

@@ -57,248 +57,222 @@
   // Inlined mirror of shapes.json so <script> tags work with no fetch/CORS.
   // Keep this object JSON-compatible and in sync with shapes.json.
   const INLINE_SHAPE_DEFS = {
-    plants: {
-      berry_bush: {
-        label: 'Berry Bush',
-        category: 'plant',
-        baseColor: '#2d6a28',
-        accentColor: '#a03050',
-        berryColor: '#c04060',
-        size: 10,
-        berryCalorieThreshold: 150,
-        clusterCount: 4,
+    "plants": {
+      "berry_bush": {
+        "label": "Berry Bush",
+        "category": "plant",
+        "baseColor": "#2d6a28",
+        "leafColor": "#3d8a38",
+        "leafDark": "#1e5a1e",
+        "accentColor": "#a03050",
+        "berryColor": "#c04060",
+        "berryHighlight": "#e07090",
+        "size": 20,
+        "berryCalorieThreshold": 1,
+        "clusterCount": 5
       },
-      grass: {
-        label: 'Grass',
-        category: 'plant',
-        baseColor: '#5aaa3a',
-        depletedColor: '#8a6a3a',
-        darkColor: '#3a7a28',
-        size: 6,
+      "grass": {
+        "label": "Grass",
+        "category": "plant",
+        "baseColor": "#5aaa3a",
+        "depletedColor": "#8a6a3a",
+        "darkColor": "#3a7a28",
+        "tipColor": "#7cc84a",
+        "size": 12
       },
-      mushroom: {
-        label: 'Mushroom',
-        category: 'plant',
-        stemColor: '#8a6a4a',
-        capColor: '#c05040',
-        capColorAlt: '#c4a070',
-        spotColor: '#f0ece0',
-        size: 7,
+      "mushroom": {
+        "label": "Mushroom",
+        "category": "plant",
+        "stemColor": "#8a6a4a",
+        "stemHighlight": "#a88868",
+        "capColor": "#c05040",
+        "capColorAlt": "#c4a070",
+        "spotColor": "#f0ece0",
+        "size": 14
       },
-      fruit_tree: {
-        label: 'Fruit Tree',
-        category: 'plant',
-        trunkColor: '#6a4428',
-        canopyColor: '#2a6a1e',
-        fruitColor: '#e08030',
-        size: 14,
-        fruitCalorieThreshold: 250,
+      "fruit_tree": {
+        "label": "Fruit Tree",
+        "category": "plant",
+        "trunkColor": "#6a4428",
+        "trunkHighlight": "#8a6038",
+        "canopyColor": "#2a6a1e",
+        "canopyLight": "#3a8a2e",
+        "fruitColor": "#e08030",
+        "fruitHighlight": "#f0a050",
+        "size": 28,
+        "fruitCalorieThreshold": 1
       },
-      cactus: {
-        label: 'Cactus',
-        category: 'plant',
-        baseColor: '#2a6a3a',
-        ridgeColor: '#4a9a5a',
-        flowerColor: '#e080a0',
-        size: 9,
-      },
+      "cactus": {
+        "label": "Cactus",
+        "category": "plant",
+        "baseColor": "#2a6a3a",
+        "baseLight": "#3a8a4a",
+        "ridgeColor": "#4a9a5a",
+        "spineColor": "#d8d0b8",
+        "flowerColor": "#e080a0",
+        "size": 18
+      }
     },
-    herbivores: {
-      rabbit: {
-        label: 'Rabbit',
-        category: 'herbivore',
-        bodyColor: '#c4a882',
-        earColor: '#b89870',
-        tailColor: '#f0ece4',
-        eyeColor: '#ffffff',
-        size: 8,
-        body: 'small_oval',
-        ears: 'long_up',
-        tail: 'cotton_puff',
-        legs: 'short',
-        features: ['ear_twitch'],
+    "herbivores": {
+      "rabbit": {
+        "label": "Rabbit",
+        "category": "herbivore",
+        "bodyColor": "#c4a882",
+        "earColor": "#b89870",
+        "tailColor": "#f0ece4",
+        "eyeColor": "#ffffff",
+        "size": 8,
+        "body": "small_oval",
+        "ears": "long_up",
+        "tail": "cotton_puff",
+        "legs": "short",
+        "features": [
+          "ear_twitch"
+        ]
       },
-      deer: {
-        label: 'Deer',
-        category: 'herbivore',
-        bodyColor: '#c4a06a',
-        earColor: '#a88850',
-        antlerColor: '#8a7048',
-        eyeColor: '#ffffff',
-        size: 14,
-        body: 'large_oval',
-        ears: 'small_pointed',
-        tail: 'short',
-        legs: 'long_thin',
-        features: ['male_antlers'],
+      "deer": {
+        "label": "Deer",
+        "category": "herbivore",
+        "bodyColor": "#c4a06a",
+        "earColor": "#a88850",
+        "antlerColor": "#8a7048",
+        "eyeColor": "#ffffff",
+        "size": 14,
+        "body": "large_oval",
+        "ears": "small_pointed",
+        "tail": "short",
+        "legs": "long_thin",
+        "features": [
+          "male_antlers"
+        ]
       },
-      cow: {
-        label: 'Cow',
-        category: 'herbivore',
-        bodyColor: '#f0ece4',
-        patchColor: '#2a2a28',
-        udderColor: '#e090a0',
-        earColor: '#d8d0c0',
-        eyeColor: '#ffffff',
-        size: 18,
-        body: 'rounded_rect',
-        ears: 'small_rounded',
-        tail: 'thin',
-        legs: 'short_stubby',
-        features: ['patches', 'udder'],
+      "bison": {
+        "label": "Bison",
+        "category": "herbivore",
+        "bodyColor": "#4a3020",
+        "humpColor": "#3a2418",
+        "hornColor": "#d0c8b0",
+        "eyeColor": "#ffffff",
+        "size": 20,
+        "body": "bulky_rect",
+        "ears": "tiny_horns",
+        "tail": "bushy",
+        "legs": "short_thick",
+        "features": [
+          "shoulder_hump"
+        ]
       },
-      raccoon: {
-        label: 'Raccoon',
-        category: 'herbivore',
-        bodyColor: '#7a7a7a',
-        maskColor: '#1a1a1a',
-        stripeColor: '#2a2a2a',
-        tailTip: '#e8e8e8',
-        earColor: '#6a6a6a',
-        eyeColor: '#ffffff',
-        size: 10,
-        body: 'medium_oval',
-        ears: 'rounded',
-        tail: 'striped_rings',
-        legs: 'medium',
-        features: ['eye_mask'],
+      "ostrich": {
+        "label": "Ostrich",
+        "category": "herbivore",
+        "bodyColor": "#2a2a2a",
+        "wingColor": "#f0ece4",
+        "neckColor": "#4a3a28",
+        "legColor": "#c4a070",
+        "eyeColor": "#ffffff",
+        "size": 16,
+        "body": "tall_oval",
+        "ears": "none",
+        "tail": "feather_fan",
+        "legs": "very_long",
+        "features": [
+          "long_neck"
+        ]
       },
-      bison: {
-        label: 'Bison',
-        category: 'herbivore',
-        bodyColor: '#4a3020',
-        humpColor: '#3a2418',
-        hornColor: '#d0c8b0',
-        eyeColor: '#ffffff',
-        size: 20,
-        body: 'bulky_rect',
-        ears: 'tiny_horns',
-        tail: 'bushy',
-        legs: 'short_thick',
-        features: ['shoulder_hump'],
-      },
-      ostrich: {
-        label: 'Ostrich',
-        category: 'herbivore',
-        bodyColor: '#2a2a2a',
-        wingColor: '#f0ece4',
-        neckColor: '#4a3a28',
-        legColor: '#c4a070',
-        eyeColor: '#ffffff',
-        size: 16,
-        body: 'tall_oval',
-        ears: 'none',
-        tail: 'feather_fan',
-        legs: 'very_long',
-        features: ['long_neck'],
-      },
-      turtle: {
-        label: 'Turtle',
-        category: 'herbivore',
-        shellColor: '#3a6a3a',
-        shellLineColor: '#2a4a2a',
-        bodyColor: '#c4a882',
-        eyeColor: '#ffffff',
-        size: 11,
-        body: 'dome_shell',
-        ears: 'none',
-        tail: 'stubby',
-        legs: 'four_short',
-        features: ['hex_shell'],
-      },
+      "turtle": {
+        "label": "Turtle",
+        "category": "herbivore",
+        "shellColor": "#3a6a3a",
+        "shellLineColor": "#2a4a2a",
+        "bodyColor": "#c4a882",
+        "eyeColor": "#ffffff",
+        "size": 11,
+        "body": "dome_shell",
+        "ears": "none",
+        "tail": "stubby",
+        "legs": "four_short",
+        "features": [
+          "hex_shell"
+        ]
+      }
     },
-    predators: {
-      wolf: {
-        label: 'Wolf',
-        category: 'predator',
-        bodyColor: '#8a8a96',
-        snoutColor: '#6a6a74',
-        earColor: '#7a7a84',
-        tailColor: '#6a6a74',
-        toothColor: '#f0ece4',
-        eyeColor: '#c03030',
-        size: 13,
-        body: 'lean_oval',
-        ears: 'pointed_up',
-        tail: 'bushy',
-        features: ['snout', 'hunt_teeth', 'hunt_glow'],
+    "predators": {
+      "wolf": {
+        "label": "Wolf",
+        "category": "predator",
+        "bodyColor": "#8a8a96",
+        "snoutColor": "#6a6a74",
+        "earColor": "#7a7a84",
+        "tailColor": "#6a6a74",
+        "toothColor": "#f0ece4",
+        "eyeColor": "#c03030",
+        "size": 13,
+        "body": "lean_oval",
+        "ears": "pointed_up",
+        "tail": "bushy",
+        "features": [
+          "snout",
+          "hunt_teeth",
+          "hunt_glow"
+        ]
       },
-      lion: {
-        label: 'Lion',
-        category: 'predator',
-        bodyColor: '#d4a84a',
-        maneColor: '#8a6020',
-        earColor: '#c49840',
-        tailTuft: '#4a3020',
-        eyeColor: '#c03030',
-        size: 17,
-        body: 'large_oval',
-        ears: 'rounded',
-        tail: 'long_tuft',
-        features: ['mane', 'roar_icon'],
+      "bear": {
+        "label": "Bear",
+        "category": "predator",
+        "bodyColor": "#4a3020",
+        "snoutColor": "#8a7050",
+        "earColor": "#5a4030",
+        "eyeColor": "#c03030",
+        "size": 20,
+        "body": "bulky_rect",
+        "ears": "rounded",
+        "tail": "stubby",
+        "features": [
+          "snout_patch",
+          "rear_up"
+        ]
       },
-      panther: {
-        label: 'Panther',
-        category: 'predator',
-        bodyColor: '#1a1a22',
-        earColor: '#2a2a32',
-        eyeColor: '#e0c040',
-        eyeGlowColor: '#ffe060',
-        size: 14,
-        body: 'sleek_oval',
-        ears: 'rounded',
-        tail: 'long_taper',
-        features: ['glow_eyes'],
-      },
-      bear: {
-        label: 'Bear',
-        category: 'predator',
-        bodyColor: '#4a3020',
-        snoutColor: '#8a7050',
-        earColor: '#5a4030',
-        eyeColor: '#c03030',
-        size: 20,
-        body: 'bulky_rect',
-        ears: 'rounded',
-        tail: 'stubby',
-        features: ['snout_patch', 'rear_up'],
-      },
-      alligator: {
-        label: 'Alligator',
-        category: 'predator',
-        bodyColor: '#2a5a2a',
-        bellyColor: '#4a7a3a',
-        jawColor: '#1a4a1a',
-        eyeColor: '#c03030',
-        size: 18,
-        body: 'long_flat_oval',
-        ears: 'none',
-        tail: 'thick_taper',
-        features: ['open_jaw', 'water_ripple'],
-      },
+      "alligator": {
+        "label": "Alligator",
+        "category": "predator",
+        "bodyColor": "#2a5a2a",
+        "bellyColor": "#4a7a3a",
+        "jawColor": "#1a4a1a",
+        "eyeColor": "#c03030",
+        "size": 18,
+        "body": "long_flat_oval",
+        "ears": "none",
+        "tail": "thick_taper",
+        "features": [
+          "open_jaw",
+          "water_ripple"
+        ]
+      }
     },
-    shared: {
-      shadowColor: 'rgba(0,0,0,0.10)',
-      calorieBar: { width: 10, height: 2, offsetY: -5 },
-      legendColors: {
-        plant: '#6aaa3a',
-        herbivore: '#d4b84a',
-        predator: '#c05040',
+    "shared": {
+      "shadowColor": "rgba(0,0,0,0.10)",
+      "calorieBar": {
+        "width": 10,
+        "height": 2,
+        "offsetY": -5
       },
-      terrain: {
-        grassBase: '#c2a86a',
-        grassTint: '#4a7a34',
-        speckleColor: 'rgba(90,70,40,0.18)',
-        rockColor: '#7a7a72',
-        rockShade: '#5a5a54',
-        tuftColor: '#3a7528',
-        waterBase: '#2a6a9a',
-        waterHighlight: 'rgba(180,220,255,0.22)',
+      "legendColors": {
+        "plant": "#6aaa3a",
+        "herbivore": "#d4b84a",
+        "predator": "#c05040"
       },
-    },
+      "terrain": {
+        "grassBase": "#c2a86a",
+        "grassTint": "#4a7a34",
+        "speckleColor": "rgba(90,70,40,0.18)",
+        "rockColor": "#7a7a72",
+        "rockShade": "#5a5a54",
+        "tuftColor": "#3a7528",
+        "waterBase": "#2a6a9a",
+        "waterHighlight": "rgba(180,220,255,0.22)"
+      }
+    }
   };
-
-  SHAPE_DEFS = INLINE_SHAPE_DEFS;
 
   Wildborn.shapes = {
     loadShapeDefs,
