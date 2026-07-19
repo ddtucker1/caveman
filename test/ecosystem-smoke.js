@@ -152,8 +152,11 @@ function assert(cond, msg) {
     'predators burn 0.1 cal/sec (1 every 10s)'
   );
   assert(Wildborn.animal.EAT_RANGE === 20, 'eat range is 20px');
-  assert(Wildborn.animal.PLANT_SIGHT_RANGE === 256, 'plant sight is 8 tiles (256px)');
-  assert(Wildborn.animal.FOOD_DETECT_RANGE === 256, 'food detect matches plant sight');
+  assert(Wildborn.animal.PLANT_SIGHT_TILES === 25, 'herbivore plant sight is 25 tiles');
+  assert(Wildborn.animal.PLANT_SIGHT_RANGE === 800, 'plant sight is 25 tiles (800px)');
+  assert(Wildborn.animal.OMNIVORE_SIGHT_TILES === 20, 'omnivore food hunt sight is 20 tiles');
+  assert(Wildborn.animal.OMNIVORE_SIGHT_RANGE === 640, 'omnivore sight is 20 tiles (640px)');
+  assert(Wildborn.animal.FOOD_DETECT_RANGE === 256, 'predator food detect stays 8 tiles (256px)');
   assert(Wildborn.animal.WATER_SPEED_MULT === 0.5, 'water speed is 50% of normal');
   assert(Wildborn.animal.AQUATIC_WATER_SPEED_MULT === 2, 'aquatic water speed is 2× land');
 }
@@ -1410,8 +1413,8 @@ function assert(cond, msg) {
   Wildborn.animal.updateAnimal(bear, 0.1, ctx);
   assert(bear.state === 'SEEK_PREY' && bear._hunting, 'omnivore enters SEEK_PREY at ≤50%');
   assert(
-    bear._searchRadius >= Wildborn.animal.FOOD_DETECT_RANGE * 2,
-    'omnivore starts with wider map search radius'
+    bear._searchRadius >= Wildborn.animal.OMNIVORE_SIGHT_RANGE,
+    'omnivore starts hunt search at 20-tile sight range'
   );
   const prevRadius = bear._searchRadius;
   Wildborn.animal.updateAnimal(bear, 1, ctx);
