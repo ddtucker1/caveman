@@ -774,6 +774,9 @@
   /**
    * Try stepping along an obstacle edge toward a blocked goal instead of freezing.
    * Returns true if a legal step was applied.
+   *
+   * Prefers continuing the previous slide heading so left/right candidate order
+   * cannot flip every frame (that looks like rapid vibration in place).
    */
   function tryShoreSlide(animal, tx, ty, dt, speedMult, ctx) {
     const dx = tx - animal.x;
@@ -801,23 +804,78 @@
       ? [speed * Math.max(dt, 0.08), TILE_SIZE * 0.55, TILE_SIZE * 0.9]
       : [speed * Math.max(dt, 0.05), TILE_SIZE * 0.45];
     const allowWater = canCrossWater(animal, ctx);
+    const prevVx = animal._slideVx;
+    const prevVy = animal._slideVy;
+    const hasPrev =
+      prevVx != null &&
+      prevVy != null &&
+      Math.hypot(prevVx, prevVy) > 0.01;
+
+    let best = null;
+    let bestScore = -Infinity;
     for (let s = 0; s < stepLens.length; s++) {
       const step = stepLens[s];
       for (let i = 0; i < candidates.length; i++) {
         const c = candidates[i];
         const cl = Math.hypot(c.x, c.y) || 1;
-        const nx = animal.x + (c.x / cl) * step;
-        const ny = animal.y + (c.y / cl) * step;
+        const ux = c.x / cl;
+        const uy = c.y / cl;
+        const nx = animal.x + ux * step;
+        const ny = animal.y + uy * step;
         if (isSolidAt(ctx, nx, ny)) continue;
         if (ctx && ctx.isWater && ctx.isWater(nx, ny) && !allowWater) continue;
-        animal.vx = (c.x / cl) * speed;
-        animal.vy = (c.y / cl) * speed;
-        animal.x = nx;
-        animal.y = ny;
-        return true;
+        // Progress toward goal + strong bonus for keeping the last slide side
+        let score = ux * fx + uy * fy;
+        if (hasPrev) {
+          const pLen = Math.hypot(prevVx, prevVy) || 1;
+          score += 2.5 * ((ux * prevVx + uy * prevVy) / pLen);
+        }
+        // Prefer shorter probe first (same stepLens order) via small bias
+        score += (stepLens.length - s) * 0.05;
+        if (score > bestScore) {
+          bestScore = score;
+          best = { ux: ux, uy: uy, nx: nx, ny: ny };
+        }
+      }
+      // Commit to a short legal step before trying larger hops
+      if (best && !stuck) break;
+    }
+    if (!best) {
+      animal._slideVx = null;
+      animal._slideVy = null;
+      return false;
+    }
+    animal.vx = best.ux * speed;
+    animal.vy = best.uy * speed;
+    animal._slideVx = animal.vx;
+    animal._slideVy = animal.vy;
+    animal.x = best.nx;
+    animal.y = best.ny;
+    return true;
+  }
+
+  /**
+   * Escape waypoint that sticks across frames. Re-picking every frame let
+   * animals ping-pong between opposite open tiles (rapid in-place vibration).
+   */
+  function getStickyEscape(animal, ctx, maxRadiusTiles) {
+    const existing = animal._escapeGoal;
+    if (existing) {
+      const dist = Math.hypot(existing.x - animal.x, existing.y - animal.y);
+      if (dist > TILE_SIZE * 0.35 && !isTerrainBlocked(animal, ctx, existing.x, existing.y)) {
+        const dx = existing.x - animal.x;
+        const dy = existing.y - animal.y;
+        const len = Math.hypot(dx, dy) || 1;
+        const stepX = animal.x + (dx / len) * Math.min(len, TILE_SIZE * 0.55);
+        const stepY = animal.y + (dy / len) * Math.min(len, TILE_SIZE * 0.55);
+        if (!isTerrainBlocked(animal, ctx, stepX, stepY)) {
+          return existing;
+        }
       }
     }
-    return false;
+    const esc = findNearbyEscape(animal, ctx, maxRadiusTiles);
+    animal._escapeGoal = esc || null;
+    return esc;
   }
 
   /**
@@ -826,7 +884,7 @@
    */
   function tryUnstick(animal, tx, ty, dt, speedMult, ctx) {
     if (tryShoreSlide(animal, tx, ty, dt, speedMult, ctx)) return true;
-    const esc = findNearbyEscape(animal, ctx, 6);
+    const esc = getStickyEscape(animal, ctx, 6);
     if (esc && stepTowardEscape(animal, esc, dt, speedMult, ctx)) return true;
     return false;
   }
@@ -1070,6 +1128,10 @@
         (animal._obstacleStuckTimer || 0) - dt * 2
       );
       animal._stuckAnchor = { x: animal.x, y: animal.y };
+      animal._slideVx = null;
+      animal._slideVy = null;
+      animal._avoidAng = null;
+      animal._escapeGoal = null;
     }
 
     // Splash particles when moving through water
@@ -1086,7 +1148,7 @@
       nearBlockingTerrain(animal, ctx) &&
       (animal._obstacleStuckTimer || 0) >= OBSTACLE_STUCK_ESCAPE_SECONDS
     ) {
-      const esc = findNearbyEscape(animal, ctx, 7);
+      const esc = getStickyEscape(animal, ctx, 7);
       if (esc && stepTowardEscape(animal, esc, dt, 0.85, ctx)) {
         updateLocalStuck(animal, dt);
         animal.stateTimer = 0.55 + rng.float() * 0.6;
@@ -1107,6 +1169,7 @@
           animal.vy = (dy / len) * effectiveSpeed(animal, 0.85);
           animal._stuckAnchor = { x: animal.x, y: animal.y };
           animal._obstacleStuckTimer = 0;
+          animal._escapeGoal = null;
           animal.stateTimer = 0.7 + rng.float() * 0.5;
           return;
         }
@@ -1121,13 +1184,15 @@
           ? Math.max(MIN_SPEED, animal.baseSpeed * aquaticWaterSpeedMult(animal) * 0.4)
           : speed * WATER_SPEED_MULT;
       }
+      // Fresh heading — drop sticky avoid angle from the last bounce
+      animal._avoidAng = null;
       // Bias fresh headings away from nearby blockers once pocket-stuck
       if (
         ctx &&
         nearBlockingTerrain(animal, ctx) &&
         (animal._obstacleStuckTimer || 0) >= OBSTACLE_STUCK_ESCAPE_SECONDS * 0.5
       ) {
-        const esc = findNearbyEscape(animal, ctx, 6);
+        const esc = getStickyEscape(animal, ctx, 6);
         if (esc) {
           const dx = esc.x - animal.x;
           const dy = esc.y - animal.y;
@@ -1154,20 +1219,23 @@
       ctx && ctx.isWater && ctx.isWater(nx, ny) && !canCrossWater(animal, ctx);
     const blockedSolid = isSolidAt(ctx, nx, ny);
     if (blockedWater || blockedSolid) {
-      // Sample several escape headings instead of a reverse bounce-lock
+      // Sample escape headings. Prefer side-steps and the last avoid heading
+      // before 180° reverse — reverse-first caused edge bounce vibration.
       let found = false;
       const baseAng = Math.atan2(animal.vy, animal.vx);
-      const tryAngles = [
-        baseAng + Math.PI,
+      const tryAngles = [];
+      if (animal._avoidAng != null) tryAngles.push(animal._avoidAng);
+      tryAngles.push(
         baseAng + Math.PI * 0.5,
         baseAng - Math.PI * 0.5,
         baseAng + Math.PI * 0.75,
         baseAng - Math.PI * 0.75,
         baseAng + Math.PI * 0.25,
         baseAng - Math.PI * 0.25,
+        baseAng + Math.PI,
         rng.float() * Math.PI * 2,
-        rng.float() * Math.PI * 2,
-      ];
+        rng.float() * Math.PI * 2
+      );
       const speed =
         Math.hypot(animal.vx, animal.vy) || Math.max(MIN_SPEED, animal.baseSpeed * 0.4);
       // Longer probe steps once pinned so one-tile cul-de-sacs can be left
@@ -1176,8 +1244,9 @@
         (animal._waterStuckTimer || 0) >= WATER_STUCK_CROSS_SECONDS;
       const probeDt = stuckHard ? Math.max(dt, 0.2) : dt;
       for (let i = 0; i < tryAngles.length; i++) {
-        const ax = Math.cos(tryAngles[i]) * speed;
-        const ay = Math.sin(tryAngles[i]) * speed;
+        const ang = tryAngles[i];
+        const ax = Math.cos(ang) * speed;
+        const ay = Math.sin(ang) * speed;
         const tx = animal.x + ax * probeDt;
         const ty = animal.y + ay * probeDt;
         if (isSolidAt(ctx, tx, ty)) continue;
@@ -1186,6 +1255,7 @@
         }
         animal.vx = ax;
         animal.vy = ay;
+        animal._avoidAng = ang;
         nx = animal.x + ax * dt;
         ny = animal.y + ay * dt;
         // If the short step is still blocked but the probe was clear, take the probe
@@ -1196,7 +1266,7 @@
         found = true;
         break;
       }
-      animal.stateTimer = 0.4 + rng.float() * 0.6;
+      animal.stateTimer = 0.55 + rng.float() * 0.75;
       if (!found) {
         // Fully boxed — accumulate stuck time, then slide / escape to open land
         animal._obstacleStuckTimer = (animal._obstacleStuckTimer || 0) + dt;
@@ -1211,7 +1281,7 @@
         }
         // canCrossWater may have flipped after the timer bump — retry once
         if (blockedWater && canCrossWater(animal, ctx)) {
-          const esc = findNearbyEscape(animal, ctx, 6);
+          const esc = getStickyEscape(animal, ctx, 6);
           if (esc && stepTowardEscape(animal, esc, dt, 0.55, ctx)) {
             animal.stateTimer = 0.5 + rng.float() * 0.5;
             return;
@@ -1275,6 +1345,10 @@
         (animal._obstacleStuckTimer || 0) - dt * 2
       );
       animal._stuckAnchor = { x: animal.x, y: animal.y };
+      animal._avoidAng = null;
+      animal._slideVx = null;
+      animal._slideVy = null;
+      animal._escapeGoal = null;
     } else if (Math.hypot(animal.vx, animal.vy) > 1) {
       animal._obstacleStuckTimer = (animal._obstacleStuckTimer || 0) + dt;
     }
@@ -2318,6 +2392,7 @@
     canCrossWater,
     isSolidAt,
     findNearbyEscape,
+    getStickyEscape,
     tryUnstick,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

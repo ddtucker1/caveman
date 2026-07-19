@@ -99,9 +99,9 @@ function assert(cond, msg) {
   const taken = consumePlant(p, 100);
   assert(taken === 10 && !p.alive, 'consumePlant depletes and kills plant (stays in memory)');
   assert(p.growthPaused === true, 'eating pauses plant growth');
-  assert(p.respawnTimer === RESPAWN_DELAY_TICKS, 'respawn timer starts at 3072s (6144 ticks)');
-  assert(RESPAWN_DELAY_TICKS === 6144, 'RESPAWN_DELAY_TICKS is 6144');
-  assert(Wildborn.plant.RESPAWN_DELAY_SECONDS === 3072, 'RESPAWN_DELAY_SECONDS is 3072');
+  assert(p.respawnTimer === RESPAWN_DELAY_TICKS, 'respawn timer starts at 2765s (5530 ticks)');
+  assert(RESPAWN_DELAY_TICKS === 5530, 'RESPAWN_DELAY_TICKS is 5530');
+  assert(Wildborn.plant.RESPAWN_DELAY_SECONDS === 2765, 'RESPAWN_DELAY_SECONDS is 2765');
   // Fast-forward respawn
   p.respawnTimer = 1;
   updatePlant(p, () => ({ x: 50, y: 50 }));
@@ -982,6 +982,54 @@ function assert(cond, msg) {
       roamEscaped +
       '/' +
       waterEdges.length +
+      ')'
+  );
+
+  // Animals at edges must walk, not vibrate in place (long thrash, tiny net move)
+  let vibrating = 0;
+  const vibrateSamples = Math.min(12, traps.length);
+  for (let i = 0; i < vibrateSamples; i++) {
+    const spot = traps[i];
+    const deer = Wildborn.animal.createAnimal('deer', spot.x, spot.y);
+    deer.state = 'IDLE';
+    deer.calories = deer.maxCalories * 0.75;
+    const ctx = makeEdgeCtx('no-vibrate-' + i);
+    let prevX = deer.x;
+    let prevY = deer.y;
+    let prevDx = 0;
+    let prevDy = 0;
+    let reversals = 0;
+    let steps = 0;
+    let pathLen = 0;
+    for (let f = 0; f < 120; f++) {
+      Wildborn.animal.updateAnimal(deer, 0.05, ctx);
+      Wildborn.animal.clampToMap(deer, MAP_PIXEL_SIZE);
+      const dx = deer.x - prevX;
+      const dy = deer.y - prevY;
+      const moved = Math.hypot(dx, dy);
+      if (moved > 0.15 && Math.hypot(prevDx, prevDy) > 0.15) {
+        steps++;
+        pathLen += moved;
+        if (dx * prevDx + dy * prevDy < 0) reversals++;
+      }
+      if (moved > 0.05) {
+        prevDx = dx;
+        prevDy = dy;
+      }
+      prevX = deer.x;
+      prevY = deer.y;
+    }
+    const net = Math.hypot(deer.x - spot.x, deer.y - spot.y);
+    const efficiency = pathLen > 1 ? net / pathLen : 1;
+    // Thrashing: lots of direction flips AND almost no net travel
+    if (steps >= 20 && reversals / steps > 0.4 && efficiency < 0.2) vibrating++;
+  }
+  assert(
+    vibrating === 0,
+    'edge animals do not vibrate in place via rapid reversals (' +
+      vibrating +
+      '/' +
+      vibrateSamples +
       ')'
   );
 }
