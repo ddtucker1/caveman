@@ -29,7 +29,7 @@
   const MIN_SPEED = 0.5;
   /** Non-aquatic animals on water move at 50% of normal speed. */
   const WATER_SPEED_MULT = 0.5;
-  /** Alligators and turtles move at 2× land speed while in water. */
+  /** Default aquatic water pace (turtles); alligator overrides via waterSpeedMult. */
   const AQUATIC_WATER_SPEED_MULT = 2;
   const TILE_SIZE = 32;
   /** Herbivores "see" plants within this many tiles (8 × 32 = 256px). */
@@ -219,8 +219,10 @@
       label: 'Alligator',
       diet: 'predator',
       maxGroupSize: 1,
-      speed: 'slow',
+      speed: 'medium',
       aquatic: true,
+      /** 75 px/s in water with medium (35) land speed. */
+      waterSpeedMult: 75 / 35,
       caloriesNeededPerDay: 180,
       maxCalories: 360,
       maxHealth: 180,
@@ -406,7 +408,7 @@
       /** Aquatic species cross water freely; waterSpeedMult controls swim vs land pace. */
       aquatic: !!(def.aquatic || def.waterSpeed),
       waterSpeedKey: def.waterSpeed || null,
-      /** Relative water speed (alligator/turtle default to 2× land). */
+      /** Relative water speed (turtle default 2× land; alligator uses species override). */
       waterSpeedMult:
         def.waterSpeedMult != null
           ? def.waterSpeedMult
