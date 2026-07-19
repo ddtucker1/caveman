@@ -1032,6 +1032,79 @@ function assert(cond, msg) {
       vibrateSamples +
       ')'
   );
+
+  // Tree+water pockets used to accumulate only obstacle time (water timer stayed
+  // 0), so canCrossWater never flipped and animals froze on the shoreline.
+  const waterTreeTraps = [];
+  for (let ty = 2; ty < MAP_TILES - 2 && waterTreeTraps.length < 24; ty++) {
+    for (let tx = 2; tx < MAP_TILES - 2 && waterTreeTraps.length < 24; tx++) {
+      if (!world.isLand(world.getTile(tx, ty))) continue;
+      let waterN = 0;
+      let landN = 0;
+      let solidN = 0;
+      const dirs = [
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1],
+      ];
+      for (let i = 0; i < dirs.length; i++) {
+        const t = world.getTile(tx + dirs[i][0], ty + dirs[i][1]);
+        if (world.isSlow(t)) waterN++;
+        else if (world.isLand(t)) landN++;
+        else if (world.isSolid(t)) solidN++;
+      }
+      if (waterN >= 1 && solidN >= 1 && landN <= 1) {
+        waterTreeTraps.push({
+          x: tx * TILE_SIZE + TILE_SIZE / 2,
+          y: ty * TILE_SIZE + TILE_SIZE / 2,
+        });
+      }
+    }
+  }
+  assert(
+    waterTreeTraps.length >= 6,
+    'found tree+water shoreline traps (' + waterTreeTraps.length + ')'
+  );
+  let waterTimerBuilt = 0;
+  let waterTreeEscaped = 0;
+  for (let i = 0; i < waterTreeTraps.length; i++) {
+    const spot = waterTreeTraps[i];
+    const deer = Wildborn.animal.createAnimal('deer', spot.x, spot.y);
+    deer.state = 'IDLE';
+    deer.calories = deer.maxCalories * 0.8;
+    const ctx = makeEdgeCtx('water-tree-' + i);
+    let maxWater = 0;
+    for (let f = 0; f < 80; f++) {
+      Wildborn.animal.updateAnimal(deer, 0.1, ctx);
+      Wildborn.animal.clampToMap(deer, MAP_PIXEL_SIZE);
+      maxWater = Math.max(maxWater, deer._waterStuckTimer || 0);
+    }
+    if (maxWater >= Wildborn.animal.WATER_STUCK_CROSS_SECONDS * 0.8) {
+      waterTimerBuilt++;
+    }
+    for (let f = 0; f < 200; f++) {
+      Wildborn.animal.updateAnimal(deer, 0.1, ctx);
+      Wildborn.animal.clampToMap(deer, MAP_PIXEL_SIZE);
+    }
+    if (Math.hypot(deer.x - spot.x, deer.y - spot.y) >= 28) waterTreeEscaped++;
+  }
+  assert(
+    waterTimerBuilt >= Math.ceil(waterTreeTraps.length * 0.7),
+    'tree+water pins build shoreline water-stuck time (' +
+      waterTimerBuilt +
+      '/' +
+      waterTreeTraps.length +
+      ')'
+  );
+  assert(
+    waterTreeEscaped >= Math.ceil(waterTreeTraps.length * 0.75),
+    'most animals escape tree+water shoreline pins (' +
+      waterTreeEscaped +
+      '/' +
+      waterTreeTraps.length +
+      ')'
+  );
 }
 
 // --- Unit: animals cannot enter trees / mountains (like the caveman) ---
@@ -1355,11 +1428,11 @@ function assert(cond, msg) {
   console.log('\nFinal stats:', JSON.stringify(afterStats, null, 2));
 }
 
-// --- Unit: extinction repopulation — 10 min delay then 4 of the species ---
+// --- Unit: extinction repopulation — 25 min delay then 4 of the species ---
 {
   assert(EXTINCTION_REPOPULATE_COUNT === 4, 'extinction repopulates with 4 animals');
-  assert(EXTINCTION_REPOPULATE_DELAY_SECONDS === 600, 'extinction delay is 600s (10 min)');
-  assert(EXTINCTION_REPOPULATE_DELAY_TICKS === 1200, 'extinction delay is 1200 ticks');
+  assert(EXTINCTION_REPOPULATE_DELAY_SECONDS === 1500, 'extinction delay is 1500s (25 min)');
+  assert(EXTINCTION_REPOPULATE_DELAY_TICKS === 3000, 'extinction delay is 3000 ticks');
 
   const world = createWorld('extinction-repop');
   world.ensureMapLoaded();
@@ -1379,20 +1452,20 @@ function assert(cond, msg) {
     'panthers removed to simulate extinction'
   );
 
-  // Also drop every other animal so the 10-minute wait is a cheap empty tick loop
+  // Also drop every other animal so the 25-minute wait is a cheap empty tick loop
   eco.animals.length = 0;
 
   for (let i = 0; i < EXTINCTION_REPOPULATE_DELAY_TICKS - 1; i++) {
     eco.update(0.5);
   }
   let panthers = eco.animals.filter((a) => a.species === 'panther' && a.alive);
-  assert(panthers.length === 0, 'no panther respawn before 10 minutes');
+  assert(panthers.length === 0, 'no panther respawn before 25 minutes');
 
   eco.update(0.5);
   panthers = eco.animals.filter((a) => a.species === 'panther' && a.alive);
   assert(
     panthers.length === EXTINCTION_REPOPULATE_COUNT,
-    'exactly 4 panthers spawn after 10 minutes (' + panthers.length + ')'
+    'exactly 4 panthers spawn after 25 minutes (' + panthers.length + ')'
   );
 
   // Spot-check another wiped species also recovered

@@ -626,9 +626,13 @@
   /**
    * True when the animal may enter water: aquatic species, fleeing a nearby
    * predator, starving, or pinned on a shoreline long enough to unstick.
+   * Once already in water, keep permission until land so soft-reject cannot
+   * bounce them forever on the shoreline mid-crossing.
    */
   function canCrossWater(animal, ctx) {
     if (animal.aquatic || animal.waterSpeedKey) return true;
+    // Finish a crossing already underway (timer decay used to yank them back)
+    if (ctx && ctx.isWater && ctx.isWater(animal.x, animal.y)) return true;
     if (animal.state === AI_STATE.FLEE && animal.fleeFrom && animal.fleeFrom.alive) {
       const d = Math.hypot(animal.x - animal.fleeFrom.x, animal.y - animal.fleeFrom.y);
       if (d <= WATER_DESPERATION_FLEE_DIST) return true;
@@ -688,6 +692,7 @@
   function findNearbyEscape(animal, ctx, maxRadiusTiles) {
     if (!ctx) return null;
     maxRadiusTiles = maxRadiusTiles == null ? 5 : maxRadiusTiles;
+    const pinnedAtWater = isNearWater(animal, ctx);
     let fallback = null;
     let fallbackScore = -1;
     // Near → far so we prefer the cul-de-sac exit over open land behind trees.
@@ -710,6 +715,7 @@
         if (isTerrainBlocked(animal, ctx, stepX, stepY)) continue;
         const onWater = !!(ctx.isWater && ctx.isWater(x, y));
         let open = 0;
+        let waterNeighbors = 0;
         const dirs = [
           [TILE_SIZE, 0],
           [-TILE_SIZE, 0],
@@ -717,18 +723,26 @@
           [0, -TILE_SIZE],
         ];
         for (let d = 0; d < dirs.length; d++) {
-          if (!isTerrainBlocked(animal, ctx, x + dirs[d][0], y + dirs[d][1])) {
+          const nx = x + dirs[d][0];
+          const ny = y + dirs[d][1];
+          if (!isTerrainBlocked(animal, ctx, nx, ny)) {
             open++;
           }
+          if (ctx.isWater && ctx.isWater(nx, ny)) waterNeighbors++;
         }
-        const score = open * 10 + r + (onWater ? 0 : 6);
+        // Prefer open dry inland tiles. Shore-to-shore "escapes" keep animals
+        // pinned on the waterline even when open == 2 along the beach.
+        let score = open * 10 + r + (onWater ? 0 : 8);
+        if (pinnedAtWater && !onWater && waterNeighbors === 0) score += 14;
+        else if (pinnedAtWater && waterNeighbors > 0) score -= waterNeighbors * 4;
         if (score > bestScore) {
           bestScore = score;
           best = { x: x, y: y };
         }
       }
-      // Accept a clearly open dry exit as soon as we see one
-      if (best && bestScore >= 26) return best;
+      // Accept a clearly open inland exit as soon as we see one. Require a
+      // higher score so plain shoreline tiles (open=2) are not treated as free.
+      if (best && bestScore >= 36) return best;
       if (best && bestScore > fallbackScore) {
         fallbackScore = bestScore;
         fallback = best;
@@ -854,15 +868,45 @@
     return true;
   }
 
+  /** True when a pixel sits on or beside water. */
+  function pixelNearWater(ctx, x, y) {
+    if (!ctx || !ctx.isWater) return false;
+    if (ctx.isWater(x, y)) return true;
+    const offsets = [
+      [TILE_SIZE, 0],
+      [-TILE_SIZE, 0],
+      [0, TILE_SIZE],
+      [0, -TILE_SIZE],
+    ];
+    for (let i = 0; i < offsets.length; i++) {
+      if (ctx.isWater(x + offsets[i][0], y + offsets[i][1])) return true;
+    }
+    return false;
+  }
+
   /**
    * Escape waypoint that sticks across frames. Re-picking every frame let
    * animals ping-pong between opposite open tiles (rapid in-place vibration).
+   *
+   * When a temporary water crossing first becomes allowed, refresh once if the
+   * sticky goal is still on the shoreline so animals can aim inland/across.
    */
   function getStickyEscape(animal, ctx, maxRadiusTiles) {
     const existing = animal._escapeGoal;
     if (existing) {
       const dist = Math.hypot(existing.x - animal.x, existing.y - animal.y);
-      if (dist > TILE_SIZE * 0.35 && !isTerrainBlocked(animal, ctx, existing.x, existing.y)) {
+      const refreshShoreOnce =
+        !animal._escapeRefreshedForWater &&
+        isNearWater(animal, ctx) &&
+        canCrossWater(animal, ctx) &&
+        pixelNearWater(ctx, existing.x, existing.y);
+      if (refreshShoreOnce) {
+        animal._escapeRefreshedForWater = true;
+        // fall through to re-pick an inland / crossable goal
+      } else if (
+        dist > TILE_SIZE * 0.35 &&
+        !isTerrainBlocked(animal, ctx, existing.x, existing.y)
+      ) {
         const dx = existing.x - animal.x;
         const dy = existing.y - animal.y;
         const len = Math.hypot(dx, dy) || 1;
@@ -893,8 +937,12 @@
    * Micro-slides along an edge used to clear stuck timers every frame while the
    * animal never left the cul-de-sac. Track a local anchor so fidgeting inside
    * one tile still builds escape pressure.
+   *
+   * When the pocket is against water, also build `_waterStuckTimer` — otherwise
+   * animals boxed by trees+water never flip canCrossWater (obstacle time alone
+   * does not authorize a swim) and freeze on the shoreline forever.
    */
-  function updateLocalStuck(animal, dt) {
+  function updateLocalStuck(animal, dt, ctx) {
     if (!animal._stuckAnchor) {
       animal._stuckAnchor = { x: animal.x, y: animal.y };
       return;
@@ -914,6 +962,31 @@
     }
     // Still in the same pocket — count time even when axis-sliding a few pixels
     animal._obstacleStuckTimer = (animal._obstacleStuckTimer || 0) + dt;
+    if (isNearWater(animal, ctx)) {
+      animal._waterStuckTimer = (animal._waterStuckTimer || 0) + dt;
+    }
+  }
+
+  /** True when a nearby tile is water (shoreline / cove). */
+  function isNearWater(animal, ctx) {
+    if (!ctx || !ctx.isWater) return false;
+    if (ctx.isWater(animal.x, animal.y)) return true;
+    const offsets = [
+      [TILE_SIZE, 0],
+      [-TILE_SIZE, 0],
+      [0, TILE_SIZE],
+      [0, -TILE_SIZE],
+      [TILE_SIZE, TILE_SIZE],
+      [-TILE_SIZE, TILE_SIZE],
+      [TILE_SIZE, -TILE_SIZE],
+      [-TILE_SIZE, -TILE_SIZE],
+    ];
+    for (let i = 0; i < offsets.length; i++) {
+      if (ctx.isWater(animal.x + offsets[i][0], animal.y + offsets[i][1])) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /** True when nearby tiles include water or solids (edge / cove / tree line). */
@@ -1120,7 +1193,7 @@
     // Pocket-aware progress: micro-slides along edges do not clear stuck time
     const moved = Math.hypot(animal.x - prevX, animal.y - prevY);
     if (ctx && nearBlockingTerrain(animal, ctx)) {
-      updateLocalStuck(animal, dt);
+      updateLocalStuck(animal, dt, ctx);
     } else if (moved > 0.2) {
       animal._waterStuckTimer = Math.max(0, (animal._waterStuckTimer || 0) - dt * 2);
       animal._obstacleStuckTimer = Math.max(
@@ -1132,6 +1205,7 @@
       animal._slideVy = null;
       animal._avoidAng = null;
       animal._escapeGoal = null;
+      animal._escapeRefreshedForWater = false;
     }
 
     // Splash particles when moving through water
@@ -1150,25 +1224,28 @@
     ) {
       const esc = getStickyEscape(animal, ctx, 7);
       if (esc && stepTowardEscape(animal, esc, dt, 0.85, ctx)) {
-        updateLocalStuck(animal, dt);
+        updateLocalStuck(animal, dt, ctx);
         animal.stateTimer = 0.55 + rng.float() * 0.6;
         return;
       }
-      // Last resort nudge: hop toward the escape tile center when sliding fails
+      // Last resort nudge: hop toward the escape tile center when sliding fails.
+      // Once shoreline-pinned long enough, allow a longer water hop so tree+water
+      // pockets can be left instead of freezing on the edge.
       if (esc) {
         const dx = esc.x - animal.x;
         const dy = esc.y - animal.y;
         const len = Math.hypot(dx, dy) || 1;
-        const hop = Math.min(len, TILE_SIZE * 0.6);
+        const allowWetHop = canCrossWater(animal, ctx);
+        const hopMax = allowWetHop ? TILE_SIZE * 1.25 : TILE_SIZE * 0.6;
+        const hop = Math.min(len, hopMax);
         const hx = animal.x + (dx / len) * hop;
         const hy = animal.y + (dy / len) * hop;
-        if (!isTerrainBlocked(animal, ctx, hx, hy)) {
+        if (!isTerrainBlocked(animal, ctx, hx, hy) && !isSolidAt(ctx, hx, hy)) {
           animal.x = hx;
           animal.y = hy;
           animal.vx = (dx / len) * effectiveSpeed(animal, 0.85);
           animal.vy = (dy / len) * effectiveSpeed(animal, 0.85);
           animal._stuckAnchor = { x: animal.x, y: animal.y };
-          animal._obstacleStuckTimer = 0;
           animal._escapeGoal = null;
           animal.stateTimer = 0.7 + rng.float() * 0.5;
           return;
@@ -1268,9 +1345,11 @@
       }
       animal.stateTimer = 0.55 + rng.float() * 0.75;
       if (!found) {
-        // Fully boxed — accumulate stuck time, then slide / escape to open land
+        // Fully boxed — accumulate stuck time, then slide / escape to open land.
+        // Count shoreline pressure even when this frame bounced off a tree: many
+        // water-edge traps are tree+water pockets that never soft-reject water.
         animal._obstacleStuckTimer = (animal._obstacleStuckTimer || 0) + dt;
-        if (blockedWater) {
+        if (blockedWater || isNearWater(animal, ctx)) {
           animal._waterStuckTimer = (animal._waterStuckTimer || 0) + dt;
         }
         const awayX = animal.x - (animal.vx || 1);
@@ -1280,7 +1359,7 @@
           return;
         }
         // canCrossWater may have flipped after the timer bump — retry once
-        if (blockedWater && canCrossWater(animal, ctx)) {
+        if ((blockedWater || isNearWater(animal, ctx)) && canCrossWater(animal, ctx)) {
           const esc = getStickyEscape(animal, ctx, 6);
           if (esc && stepTowardEscape(animal, esc, dt, 0.55, ctx)) {
             animal.stateTimer = 0.5 + rng.float() * 0.5;
@@ -1334,7 +1413,7 @@
     const moved = Math.hypot(animal.x - prevX, animal.y - prevY);
     if (ctx && nearBlockingTerrain(animal, ctx)) {
       // Pocket time ignores micro-slides; only a real exit clears the anchor
-      updateLocalStuck(animal, dt);
+      updateLocalStuck(animal, dt, ctx);
       if (moved < 0.2 && ctx.isWater && ctx.isWater(nx, ny)) {
         animal._waterStuckTimer = (animal._waterStuckTimer || 0) + dt;
       }
@@ -1349,6 +1428,7 @@
       animal._slideVx = null;
       animal._slideVy = null;
       animal._escapeGoal = null;
+      animal._escapeRefreshedForWater = false;
     } else if (Math.hypot(animal.vx, animal.vy) > 1) {
       animal._obstacleStuckTimer = (animal._obstacleStuckTimer || 0) + dt;
     }
@@ -2391,6 +2471,7 @@
     wakeAnimal,
     canCrossWater,
     isSolidAt,
+    isNearWater,
     findNearbyEscape,
     getStickyEscape,
     tryUnstick,
