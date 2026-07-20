@@ -1952,14 +1952,14 @@ function assert(cond, msg) {
 // --- Unit: view radius config (graphics cull; sim continues) ---
 {
   assert(
-    Wildborn.config.viewRadiusTiles === 20,
-    'view radius is 20 tiles in all directions'
+    Wildborn.config.viewRadiusTiles === 30,
+    'view radius is 30 tiles in all directions'
   );
 }
 
-// --- Unit: player melee attack + animal counter-attack ---
+// --- Unit: player melee attack + herbivore flees ---
 {
-  const { createPlayer, tryPlayerAttack, damagePlayer } = Wildborn.player;
+  const { createPlayer, tryPlayerAttack } = Wildborn.player;
   const player = createPlayer({ x: 100, y: 100 });
   const rabbit = Wildborn.animal.createAnimal('rabbit', 120, 115);
   const beforeHp = rabbit.health;
@@ -1968,8 +1968,9 @@ function assert(cond, msg) {
   assert(result.swung === true, 'player swing starts on mouse-tap attack');
   assert(result.hit === rabbit, 'player melee hits nearby animal');
   assert(rabbit.health < beforeHp, 'animal takes damage from player swing');
-  assert(rabbit._counterAttack === true, 'hit animal enters counter-attack');
-  assert(rabbit.target === player, 'hit animal targets the player');
+  assert(rabbit.state === 'FLEE', 'hit herbivore flees from the caveman');
+  assert(rabbit.fleeFrom === player, 'hit herbivore flees from the player');
+  assert(rabbit._counterAttack !== true, 'herbivores do not counter-attack the player');
   assert(player.attackCooldown > 0, 'player attack enters cooldown');
   assert(player.swingTimer > 0, 'player swing animation starts');
 
@@ -1978,6 +1979,184 @@ function assert(cond, msg) {
   player.attackCooldown = 0;
   const miss = tryPlayerAttack(player, { animals: [far] });
   assert(miss.swung === true && miss.hit == null, 'swing misses animals outside melee range');
+}
+
+// --- Unit: tree / rock harvest (20 hits → 100 wood / stone) ---
+{
+  const { createPlayer, tryPlayerAttack, HARVEST_HITS, TREE_WOOD_YIELD, ROCK_STONE_YIELD } =
+    Wildborn.player;
+  const world = createWorld('harvest-test');
+  world.ensureMapLoaded();
+
+  // Find TREE / CLIFF tiles that have a walkable land neighbor to stand on
+  function findHarvestSpot(tileType) {
+    for (let ty = 40; ty < 360; ty++) {
+      for (let tx = 40; tx < 360; tx++) {
+        if (world.getTile(tx, ty) !== tileType) continue;
+        const dirs = [
+          [1, 0],
+          [-1, 0],
+          [0, 1],
+          [0, -1],
+        ];
+        for (let d = 0; d < dirs.length; d++) {
+          const sx = tx + dirs[d][0];
+          const sy = ty + dirs[d][1];
+          if (world.isLand(world.getTile(sx, sy))) {
+            return {
+              tx: tx,
+              ty: ty,
+              standX: sx * TILE_SIZE + (TILE_SIZE - 30) / 2,
+              standY: sy * TILE_SIZE + (TILE_SIZE - 30) / 2,
+              faceX: -dirs[d][0],
+              faceY: -dirs[d][1],
+            };
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  const treeSpot = findHarvestSpot(Wildborn.world.TILE.TREE);
+  const rockSpot = findHarvestSpot(Wildborn.world.TILE.CLIFF);
+  assert(!!treeSpot, 'found a TREE tile with land neighbor');
+  assert(!!rockSpot, 'found a CLIFF rock tile with land neighbor');
+
+  const player = createPlayer({ x: treeSpot.standX, y: treeSpot.standY });
+  player.facingX = treeSpot.faceX;
+  player.facingY = treeSpot.faceY;
+
+  for (let i = 0; i < HARVEST_HITS - 1; i++) {
+    player.attackCooldown = 0;
+    const r = tryPlayerAttack(player, { animals: [] }, world);
+    assert(r.swung && r.harvest && !r.harvest.broken, 'tree hit ' + (i + 1) + ' chips wood');
+  }
+  player.attackCooldown = 0;
+  const fell = tryPlayerAttack(player, { animals: [] }, world);
+  assert(fell.harvest && fell.harvest.broken, 'tree falls on hit 20');
+  assert(fell.harvest.resource === 'wood' && fell.harvest.amount === TREE_WOOD_YIELD, 'tree yields 100 wood');
+  assert(player.inventory.wood === TREE_WOOD_YIELD, '100 wood in inventory');
+  assert(
+    world.getTile(treeSpot.tx, treeSpot.ty) === Wildborn.world.TILE.GRASS,
+    'fallen tree becomes grass'
+  );
+
+  player.x = rockSpot.standX;
+  player.y = rockSpot.standY;
+  player.facingX = rockSpot.faceX;
+  player.facingY = rockSpot.faceY;
+  player.inventory.stone = 0;
+  for (let i = 0; i < HARVEST_HITS - 1; i++) {
+    player.attackCooldown = 0;
+    tryPlayerAttack(player, { animals: [] }, world);
+  }
+  player.attackCooldown = 0;
+  const cracked = tryPlayerAttack(player, { animals: [] }, world);
+  assert(cracked.harvest && cracked.harvest.broken, 'rock breaks on hit 20');
+  assert(
+    cracked.harvest.resource === 'stone' && cracked.harvest.amount === ROCK_STONE_YIELD,
+    'rock yields 100 stone'
+  );
+  assert(player.inventory.stone === ROCK_STONE_YIELD, '100 stone in inventory');
+}
+
+// --- Unit: herbivore flees / predator aggro within 10 tiles of caveman ---
+{
+  const player = Wildborn.player.createPlayer({ x: 200, y: 200 });
+  const range = Wildborn.animal.PLAYER_THREAT_RANGE;
+  assert(Wildborn.animal.PLAYER_THREAT_TILES === 10, 'player threat range is 10 tiles');
+  assert(range === 10 * TILE_SIZE, 'player threat range is 640px');
+
+  const deer = Wildborn.animal.createAnimal('deer', 200 + range - 20, 200);
+  const fleeCtx = {
+    rng: createRng('flee-player'),
+    tickSeconds: 0.5,
+    player: player,
+    isWater: () => false,
+    findNearestAnimal: () => null,
+    findNearestPlant: () => null,
+    queryAnimals: () => [],
+  };
+  Wildborn.animal.updateAnimal(deer, 0.1, fleeCtx);
+  assert(deer.state === 'FLEE', 'herbivore flees when caveman within 10 tiles');
+  assert(deer.fleeFrom === player, 'herbivore flees from the caveman');
+
+  const wolf = Wildborn.animal.createAnimal('wolf', 200 + range - 20, 200);
+  wolf.calories = wolf.maxCalories; // full — still should aggro
+  const huntCtx = {
+    rng: createRng('aggro-player'),
+    tickSeconds: 0.5,
+    player: player,
+    isWater: () => false,
+    findNearestAnimal: () => null,
+    findNearestPlant: () => null,
+    queryAnimals: () => [],
+  };
+  Wildborn.animal.updateAnimal(wolf, 0.1, huntCtx);
+  assert(wolf._playerAggro === true, 'predator aggros caveman within 10 tiles');
+  assert(wolf.target === player, 'predator targets caveman on proximity');
+  assert(wolf.state === 'SEEK_PREY', 'predator seeks caveman on proximity');
+  assert(wolf._hunting === true, 'predator hunts caveman on proximity even when full');
+}
+
+// --- Unit: death drops backpack and respawns empty at start ---
+{
+  const {
+    createPlayer,
+    damagePlayer,
+    handlePlayerDeath,
+    tryPickupBackpacks,
+  } = Wildborn.player;
+  const spawn = { x: 64, y: 64 };
+  const player = createPlayer(spawn);
+  player.x = 500;
+  player.y = 500;
+  player.inventory.wood = 40;
+  player.inventory.stone = 10;
+  player.inventory.leather = 2;
+
+  damagePlayer(player, 999);
+  assert(player.alive === false, 'player dies at 0 hp');
+
+  const death = handlePlayerDeath(player, spawn);
+  assert(death.backpack != null, 'death drops a backpack');
+  assert(death.backpack.inventory.wood === 40, 'backpack holds wood');
+  assert(death.backpack.x === 500 + player.w / 2, 'backpack at death X');
+  assert(player.alive === true, 'player respawns alive');
+  assert(player.x === spawn.x && player.y === spawn.y, 'player respawns at start');
+  assert(player.inventory.wood === 0 && player.inventory.stone === 0, 'respawn inventory empty');
+  assert(player.hp === player.maxHp, 'respawn restores health');
+
+  const bags = [death.backpack];
+  // Walk onto backpack
+  player.x = death.backpack.x - player.w / 2;
+  player.y = death.backpack.y - player.h / 2;
+  const picked = tryPickupBackpacks(player, bags);
+  assert(picked === true, 'walking onto backpack picks it up');
+  assert(player.inventory.wood === 40 && player.inventory.leather === 2, 'reclaimed backpack loot');
+  assert(bags.length === 0, 'backpack removed after pickup');
+}
+
+// --- Unit: butcher corpse for leather / fat / bones ---
+{
+  const { createPlayer, tryPlayerAttack } = Wildborn.player;
+  const player = createPlayer({ x: 100, y: 100 });
+  const rabbit = Wildborn.animal.createAnimal('rabbit', 120, 115);
+  // maxCalories 60 → 6 of each resource
+  Wildborn.animal.killAnimal(rabbit, null);
+  assert(rabbit.lootRemaining === 6, 'rabbit yields 6 butcher hits (60/10)');
+
+  for (let i = 0; i < 6; i++) {
+    player.attackCooldown = 0;
+    const r = tryPlayerAttack(player, { animals: [rabbit] });
+    assert(r.butcher != null, 'butcher hit ' + (i + 1) + ' collects resources');
+  }
+  assert(player.inventory.leather === 6, 'collected 6 leather');
+  assert(player.inventory.fat === 6, 'collected 6 fat');
+  assert(player.inventory.bones === 6, 'collected 6 bones');
+  assert(rabbit.lootRemaining === 0, 'corpse empty after full butcher');
+  assert(rabbit.corpseCalories === 0, 'empty carcass cleared for removal');
 }
 
 // --- Unit: hunting predators attack the player ---

@@ -184,6 +184,11 @@
   const FLEE_ENTER_RANGE = 200;
   /** Herbivores stop fleeing once the predator is this far away. */
   const FLEE_SAFE_RANGE = 400;
+  /** Caveman proximity that makes herbivores flee / predators aggro (10 tiles). */
+  const PLAYER_THREAT_TILES = 10;
+  const PLAYER_THREAT_RANGE = PLAYER_THREAT_TILES * TILE_SIZE;
+  /** Herbivores keep fleeing the caveman until this far away. */
+  const PLAYER_FLEE_SAFE_RANGE = 15 * TILE_SIZE;
   /**
    * While eating a plant, interrupt only if a predator within this range is
    * actively targeting this animal (stubborn eating).
@@ -1464,13 +1469,13 @@
       return dmg;
     }
 
-    // Herbivores attacked by the player fight back; otherwise they flee predators.
+    // Herbivores flee from the caveman when hit (same as proximity flee).
     if (hitByPlayer && isLivingCombatTarget(attacker)) {
-      target._counterAttack = true;
-      target.target = attacker;
+      target._counterAttack = false;
+      target.target = null;
       target.fleeFrom = attacker;
       target.state = AI_STATE.FLEE;
-      target.stateTimer = 3.5;
+      target.stateTimer = 2.5;
       return dmg;
     }
 
@@ -1511,9 +1516,12 @@
     // Corpses yield only the calories the creature had at death.
     animal.corpseCalories = Math.max(0, animal.calories);
     animal.corpseDecay = CORPSE_DECAY_TICKS; // 1 minute onscreen
+    // Stick-butcher yield: 1 leather + 1 fat + 1 bones per 10 max calories.
+    animal.lootRemaining = Math.floor((animal.maxCalories || 0) / 10);
     animal.deadAt = null; // render sets wall-clock time on first draw
     animal.target = null;
     animal._counterAttack = false;
+    animal._playerAggro = false;
     if (killer && killer.alive && killer.kind !== 'player') {
       // Killer may immediately start eating
       killer.target = animal;
@@ -1551,6 +1559,11 @@
     // Water flag for aquatic / water-crossing movement
     if (ctx.isWater) {
       animal._inWater = ctx.isWater(animal.x, animal.y);
+    }
+
+    // Caveman proximity: herbivores flee, predators aggro until the player dies.
+    if (updatePlayerProximity(animal, ctx)) {
+      // Still allow flee / seek chase this frame.
     }
 
     // Predator hunger gate: all predators hunt at ≤50%
@@ -1592,10 +1605,20 @@
   /**
    * Predators: ROAM while calories > 50%; enter SEEK_PREY hunt at ≤50%;
    * stay hunting until calories ≥ 70%, then ROAM.
+   * Player-aggro hunts ignore satiation until the caveman is dead.
    */
   function updatePredatorHungerGate(animal) {
     const ratio = hungerRatio(animal);
     if (animal.state === AI_STATE.DEAD || animal.state === AI_STATE.FLEE || animal.state === AI_STATE.SLEEP) return;
+
+    // Sticky caveman aggro overrides hunger satiation.
+    if (animal._playerAggro) {
+      animal._hunting = true;
+      if (animal.state !== AI_STATE.SEEK_PREY && animal.state !== AI_STATE.EATING) {
+        animal.state = AI_STATE.SEEK_PREY;
+      }
+      return;
+    }
 
     const threshold = huntThreshold(animal);
 
@@ -1619,6 +1642,66 @@
     }
 
     if (animal.state === AI_STATE.IDLE) animal.state = AI_STATE.ROAM;
+  }
+
+  /**
+   * Herbivores flee within 10 tiles of the caveman.
+   * Predators attack the caveman once within 10 tiles until he is dead.
+   * @returns {boolean} true if this reaction changed state this frame
+   */
+  function updatePlayerProximity(animal, ctx) {
+    const player = ctx && ctx.player;
+    if (!player) return false;
+
+    if (isPredator(animal)) {
+      if (!isLivingCombatTarget(player)) {
+        if (animal._playerAggro) {
+          animal._playerAggro = false;
+          if (animal.target && animal.target.kind === 'player') {
+            animal.target = null;
+          }
+        }
+        return false;
+      }
+
+      if (animal._playerAggro) {
+        animal.target = player;
+        animal._hunting = true;
+        animal.fleeFrom = null;
+        clearEatingVisuals(animal);
+        if (animal.state === AI_STATE.SLEEP) wakeAnimal(animal);
+        animal.state = AI_STATE.SEEK_PREY;
+        return true;
+      }
+
+      const pp = targetPos(player);
+      if (dist2(animal.x, animal.y, pp.x, pp.y) <= PLAYER_THREAT_RANGE * PLAYER_THREAT_RANGE) {
+        animal._playerAggro = true;
+        animal.target = player;
+        animal._hunting = true;
+        animal.fleeFrom = null;
+        clearEatingVisuals(animal);
+        if (animal.state === AI_STATE.SLEEP) wakeAnimal(animal);
+        animal.state = AI_STATE.SEEK_PREY;
+        return true;
+      }
+      return false;
+    }
+
+    if (animal.diet !== 'herbivore') return false;
+    if (!isLivingCombatTarget(player)) return false;
+
+    // Already fleeing this caveman — keep FLEE handler in charge.
+    if (animal.state === AI_STATE.FLEE && animal.fleeFrom === player) return false;
+
+    const pp = targetPos(player);
+    if (dist2(animal.x, animal.y, pp.x, pp.y) <= PLAYER_THREAT_RANGE * PLAYER_THREAT_RANGE) {
+      if (animal.state === AI_STATE.SLEEP) wakeAnimal(animal);
+      animal._counterAttack = false;
+      beginFleeFromThreat(animal, player);
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -1954,10 +2037,10 @@
   function isValidFoodTarget(animal, t) {
     if (!t) return false;
     if (t.kind === 'player') {
-      // Hunting predators (and anything already counter-attacking the player) chase the caveman.
+      // Hunting / player-aggro predators chase the caveman until he is dead.
       if (!isLivingCombatTarget(t)) return false;
       if (animal._counterAttack && animal.target === t) return true;
-      return isPredator(animal) && !!animal._hunting;
+      return isPredator(animal) && (!!animal._hunting || !!animal._playerAggro);
     }
     if (t.kind === 'plant') return animal.diet === 'herbivore' && t.alive && t.calories > 0;
     if (t.kind === 'animal') {
@@ -2001,10 +2084,16 @@
     if (
       animal.diet === 'predator' ||
       animal.state === AI_STATE.SEEK_PREY ||
-      animal._hunting
+      animal._hunting ||
+      animal._playerAggro
     ) {
-      // Hunting predators attack the player when in detect range.
+      // Player-aggro predators always chase the caveman first.
       const player = ctx.player;
+      if (animal._playerAggro && player && isLivingCombatTarget(player)) {
+        return player;
+      }
+
+      // Hunting predators attack the player when in detect range.
       let playerDist2 = Infinity;
       if (animal._hunting && player && isLivingCombatTarget(player)) {
         const pp = targetPos(player);
@@ -2292,9 +2381,11 @@
     const tp = targetPos(threat);
     const dist = Math.hypot(animal.x - tp.x, animal.y - tp.y);
 
-    // Herbivores: keep fleeing until predator is far enough away
+    // Herbivores: keep fleeing until predator / caveman is far enough away
     if (animal.diet === 'herbivore') {
-      if (dist >= FLEE_SAFE_RANGE) {
+      const safe =
+        threat.kind === 'player' ? PLAYER_FLEE_SAFE_RANGE : FLEE_SAFE_RANGE;
+      if (dist >= safe) {
         animal.fleeFrom = null;
         animal.state = AI_STATE.IDLE;
         return;
@@ -2336,7 +2427,7 @@
   function tickAnimal(animal, ctx) {
     const result = {};
 
-    // Corpse decay
+    // Corpse decay (butchered-empty corpses set calories/decay to 0 and drop here)
     if (animal.state === AI_STATE.DEAD) {
       animal.corpseDecay -= 1;
       if (animal.corpseDecay <= 0 || animal.corpseCalories <= 0) {
@@ -2455,6 +2546,9 @@
     TERRITORY_RETURN_RATIO,
     FLEE_ENTER_RANGE,
     FLEE_SAFE_RANGE,
+    PLAYER_THREAT_TILES,
+    PLAYER_THREAT_RANGE,
+    PLAYER_FLEE_SAFE_RANGE,
     EAT_PREDATOR_INTERRUPT_RANGE,
     PLANT_SIGHT_RANGE,
     PLANT_SIGHT_TILES,

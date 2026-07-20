@@ -186,6 +186,20 @@
       return getTile(tx, ty);
     }
 
+    /** Mutate a tile at world tile coordinates (used for chopping trees / breaking rock). */
+    function setTile(tx, ty, tile) {
+      if (!inMapTile(tx, ty)) return false;
+      const cx = Math.floor(tx / CHUNK_SIZE);
+      const cy = Math.floor(ty / CHUNK_SIZE);
+      let lx = tx - cx * CHUNK_SIZE;
+      let ly = ty - cy * CHUNK_SIZE;
+      if (lx < 0) lx += CHUNK_SIZE;
+      if (ly < 0) ly += CHUNK_SIZE;
+      const chunk = ensureChunk(cx, cy);
+      chunk.tiles[ly * CHUNK_SIZE + lx] = tile;
+      return true;
+    }
+
     /** Ensure chunks overlapping a world-pixel AABB are loaded. */
     function ensureChunksInBounds(x0, y0, x1, y1) {
       const tx0 = Math.floor(x0 / TILE_SIZE);
@@ -233,6 +247,9 @@
       chunks,
       getTile,
       getTileAtPixel,
+      setTile,
+      /** Hits remaining per harvestable tile key "tx,ty" (TREE / CLIFF). */
+      tileHits: new Map(),
       ensureChunk,
       ensureChunksInBounds,
       ensureMapLoaded,

@@ -7,12 +7,21 @@
   const config = Wildborn.config;
   const { createRng, randomSeedString } = Wildborn.rng;
   const { createWorld, TILE_SIZE, MAP_PIXEL_SIZE } = Wildborn.world;
-  const { createPlayer, updatePlayer, findSpawn, tryPlayerAttack } = Wildborn.player;
+  const {
+    createPlayer,
+    updatePlayer,
+    findSpawn,
+    tryPlayerAttack,
+    handlePlayerDeath,
+    tryPickupBackpacks,
+    INVENTORY_KEYS,
+  } = Wildborn.player;
   const {
     createCamera,
     updateCamera,
     snapCamera,
     clampCameraToMap,
+    getVisibleBounds,
   } = Wildborn.camera;
   const {
     clear,
@@ -23,6 +32,7 @@
     drawLegend,
     drawTooltip,
     drawMinimap,
+    drawBackpacks,
     getMinimapLayout,
     getMinimapViewportRect,
     pickEntityAt,
@@ -53,6 +63,7 @@
     showEcosystemDebug: !!config.ecosystemDebugOverlay,
     showLegend: !!config.showLegend,
     showCensus: !!config.showCensus,
+    showInventory: false,
     censusRefreshAccum: 0,
     mouseX: 0,
     mouseY: 0,
@@ -64,6 +75,10 @@
     speed: config.gameSpeed || 1,
     /** Active minimap viewport drag (null when idle). */
     minimapDrag: null,
+    /** Ground loot bags left where the caveman died. */
+    backpacks: [],
+    /** Starting spawn used for death respawn. */
+    spawnPoint: null,
   };
 
   // ---------------------------------------------------------------------------
@@ -512,10 +527,24 @@
       return;
     }
 
-    // ESC — close entity inspector
-    if (e.code === 'Escape' && state === 'playing' && game.inspectEntity) {
-      closeInspector();
+    // Q — toggle inventory
+    if (e.code === 'KeyQ' && state === 'playing') {
+      toggleInventory();
       e.preventDefault();
+      return;
+    }
+
+    // ESC — close inventory / entity inspector
+    if (e.code === 'Escape' && state === 'playing') {
+      if (game.showInventory) {
+        setInventoryVisible(false);
+        e.preventDefault();
+        return;
+      }
+      if (game.inspectEntity) {
+        closeInspector();
+        e.preventDefault();
+      }
     }
   });
 
@@ -611,7 +640,7 @@
           return;
         }
       }
-      tryPlayerAttack(game.player, game.ecosystem);
+      tryPlayerAttack(game.player, game.ecosystem, game.world);
       e.preventDefault();
     }
   });
@@ -701,7 +730,11 @@
       game.world.ensureChunksInBounds(0, 0, MAP_PIXEL_SIZE - 1, MAP_PIXEL_SIZE - 1);
     }
     const spawn = findSpawn(game.world);
+    game.spawnPoint = { x: spawn.x, y: spawn.y };
     game.player = createPlayer(spawn);
+    game.backpacks = [];
+    game.showInventory = false;
+    setInventoryVisible(false);
 
     // Living ecosystem (optional — config.ecosystemEnabled)
     game.ecosystem = null;
@@ -717,6 +750,7 @@
     snapCamera(game.camera, game.player, MAP_PIXEL_SIZE);
     setSeedDisplay(seedString);
     updateHud(game.player);
+    refreshInventory();
 
     if (btnCensus) btnCensus.classList.remove('hidden');
     if (btnSpeed) btnSpeed.classList.remove('hidden');
@@ -733,12 +767,75 @@
     game.time = 0;
   }
 
+  // ---------------------------------------------------------------------------
+  // Inventory panel (Q)
+  // ---------------------------------------------------------------------------
+
+  const inventoryWindow = document.getElementById('inventory-window');
+  const inventoryClose = document.getElementById('inventory-close');
+  const inventoryRows = document.getElementById('inventory-rows');
+
+  function setInventoryVisible(visible) {
+    game.showInventory = !!visible;
+    if (!inventoryWindow) return;
+    if (game.showInventory) {
+      inventoryWindow.classList.remove('hidden');
+      refreshInventory();
+    } else {
+      inventoryWindow.classList.add('hidden');
+    }
+  }
+
+  function toggleInventory() {
+    setInventoryVisible(!game.showInventory);
+  }
+
+  function refreshInventory() {
+    if (!inventoryRows || !game.player) return;
+    const inv = game.player.inventory || {};
+    const keys = INVENTORY_KEYS || Object.keys(inv);
+    let html = '';
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      const amount = inv[key] || 0;
+      const label = key.charAt(0).toUpperCase() + key.slice(1);
+      html +=
+        '<div class="inventory-row">' +
+        '<span class="inventory-name">' +
+        label +
+        '</span>' +
+        '<span class="inventory-count">' +
+        amount +
+        '</span>' +
+        '</div>';
+    }
+    inventoryRows.innerHTML = html;
+  }
+
+  if (inventoryClose) {
+    inventoryClose.addEventListener('click', function () {
+      setInventoryVisible(false);
+    });
+  }
+
   function update(dt) {
     // Cap raw frame dt, then apply global speed so 3× still stays stable.
     const step = Math.min(dt, 0.05) * (game.speed || 1);
     game.time += step;
 
+    // Death → backpack at death site, respawn at start with empty inventory
+    if (game.player && !game.player.alive) {
+      const death = handlePlayerDeath(game.player, game.spawnPoint);
+      if (death.backpack) game.backpacks.push(death.backpack);
+      if (game.camera) {
+        snapCamera(game.camera, game.player, MAP_PIXEL_SIZE);
+        game.camera.followPlayer = true;
+      }
+      refreshInventory();
+    }
+
     updatePlayer(game.player, game.keys, step, game.world);
+    tryPickupBackpacks(game.player, game.backpacks);
     updateCamera(game.camera, game.player, MAP_PIXEL_SIZE);
 
     // Keep the whole fixed map loaded (49 chunks at 400×400 / 64)
@@ -777,6 +874,7 @@
     }
 
     updateHud(game.player);
+    if (game.showInventory) refreshInventory();
   }
 
   function render() {
@@ -793,6 +891,10 @@
         hoverEntity: game.hoverEntity,
         player: game.player,
       });
+    }
+
+    if (game.backpacks && game.backpacks.length) {
+      drawBackpacks(ctx, game.backpacks, game.camera, game.player);
     }
 
     drawPlayer(ctx, game.player, game.camera);
