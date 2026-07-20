@@ -712,6 +712,64 @@
     setBar('bar-stamina', player.stamina / player.maxStamina);
   }
 
+  /**
+   * Draw death backpacks left on the ground (loot piles).
+   * @param {CanvasRenderingContext2D} ctx
+   * @param {object[]} backpacks
+   * @param {object} camera
+   * @param {object} [player]
+   */
+  function drawBackpacks(ctx, backpacks, camera, player) {
+    if (!backpacks || !backpacks.length) return;
+    for (let i = 0; i < backpacks.length; i++) {
+      const bag = backpacks[i];
+      if (player && !inViewRadius(player, bag.x, bag.y)) continue;
+      const sx = bag.x - camera.x;
+      const sy = bag.y - camera.y;
+      if (
+        sx < -40 ||
+        sy < -40 ||
+        sx > camera.width + 40 ||
+        sy > camera.height + 40
+      ) {
+        continue;
+      }
+
+      ctx.save();
+      ctx.translate(sx, sy);
+
+      // Simple hide satchel
+      ctx.fillStyle = '#6a4a28';
+      ctx.beginPath();
+      ctx.moveTo(-10, -4);
+      ctx.lineTo(10, -4);
+      ctx.lineTo(12, 10);
+      ctx.lineTo(-12, 10);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = '#8a6238';
+      ctx.fillRect(-8, -10, 16, 7);
+
+      ctx.strokeStyle = '#3a2814';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(-8, -10, 16, 7);
+      ctx.beginPath();
+      ctx.moveTo(-10, -4);
+      ctx.lineTo(10, -4);
+      ctx.lineTo(12, 10);
+      ctx.lineTo(-12, 10);
+      ctx.closePath();
+      ctx.stroke();
+
+      // Strap buckle
+      ctx.fillStyle = '#c9a227';
+      ctx.fillRect(-3, -2, 6, 4);
+
+      ctx.restore();
+    }
+  }
+
   function setBar(id, ratio) {
     const el = document.querySelector('#' + id + ' > span');
     if (el) el.style.width = Math.max(0, Math.min(1, ratio)) * 100 + '%';
@@ -1412,6 +1470,7 @@
     drawLegend,
     drawTooltip,
     drawMinimap,
+    drawBackpacks,
     getMinimapLayout,
     getMinimapViewportRect,
     pickEntityAt,

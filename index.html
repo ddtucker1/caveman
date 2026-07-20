@@ -245,6 +245,63 @@
       overflow: hidden;
       text-overflow: ellipsis;
     }
+    #inventory-window {
+      position: absolute;
+      top: 112px;
+      left: 12px;
+      width: min(220px, 70vw);
+      pointer-events: auto;
+      background: rgba(12, 16, 10, 0.88);
+      border: 1px solid rgba(220, 210, 160, 0.35);
+      border-radius: 6px;
+      color: #ffffff;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+      user-select: none;
+      z-index: 22;
+      font-size: 12px;
+    }
+    #inventory-window.hidden { display: none; }
+    #inventory-titlebar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 8px 10px;
+      background: rgba(0, 0, 0, 0.35);
+      border-bottom: 1px solid rgba(220, 210, 160, 0.25);
+      border-radius: 6px 6px 0 0;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      color: #d4c48a;
+    }
+    #inventory-close {
+      pointer-events: auto;
+      cursor: pointer;
+      border: none;
+      background: transparent;
+      color: #ffffff;
+      font-size: 16px;
+      line-height: 1;
+      padding: 0 4px;
+      opacity: 0.85;
+    }
+    #inventory-close:hover { opacity: 1; }
+    #inventory-body {
+      padding: 8px 12px 10px;
+    }
+    .inventory-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 3px 0;
+      white-space: nowrap;
+    }
+    .inventory-name { opacity: 0.9; }
+    .inventory-count {
+      font-variant-numeric: tabular-nums;
+      color: #d8f0a8;
+    }
     #help {
       position: absolute;
       bottom: 12px;
@@ -374,10 +431,20 @@
         <div id="inspector-body"></div>
       </div>
 
+      <div id="inventory-window" class="hidden" role="dialog" aria-label="Inventory">
+        <div id="inventory-titlebar">
+          <span>Inventory</span>
+          <button id="inventory-close" type="button" aria-label="Close">×</button>
+        </div>
+        <div id="inventory-body">
+          <div id="inventory-rows"></div>
+        </div>
+      </div>
+
       <div id="help">
-        WASD / Arrows — move &nbsp;·&nbsp; 400×400 map<br />
-        Tab — census &nbsp; L — legend &nbsp; F3 — debug<br />
-        Click entity — inspect &nbsp;·&nbsp; Hover for tooltip
+        WASD / Arrows — move &nbsp;·&nbsp; Click — swing stick<br />
+        Q — inventory &nbsp; Tab — census &nbsp; L — legend &nbsp; F3 — debug<br />
+        Chop trees / rocks · Right-click inspect · Hover tooltip
       </div>
     </div>
 

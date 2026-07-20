@@ -61,6 +61,6 @@
      * Only tiles/entities within this Chebyshev distance (tiles) of the player
      * are drawn. Simulation continues everywhere; outside is black.
      */
-    viewRadiusTiles: 20,
+    viewRadiusTiles: 30,
   };
 })(typeof window !== 'undefined' ? window : globalThis);
