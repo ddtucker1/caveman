@@ -73,10 +73,16 @@ Entities use **data-driven geometric silhouettes** (`src/shapes.json` /
 ### Controls
 
 - **WASD / Arrows** — move
+- **Left click** — swing weapon (hits animals in melee range; they fight back)
+- **Right click** — inspect plant/animal
 - **Tab** — toggle Ecosystem Census (also via top-right Census button)
 - **L** — toggle species legend (icons, names, live population counts)
 - **F3** — toggle ecosystem debug overlay (population & calorie stats)
 - **Hover** — entity tooltip (species, calories, state)
+
+Only tiles and entities within **20 tiles** of the caveman are drawn; farther terrain
+is black. The simulation still runs off-screen. Hunting predators will attack the
+player when hungry.
 
 ### Config
 

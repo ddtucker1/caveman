@@ -56,5 +56,11 @@
 
     /** Global simulation / movement speed multiplier (1 = normal, 3 = triple speed). */
     gameSpeed: 1,
+
+    /**
+     * Only tiles/entities within this Chebyshev distance (tiles) of the player
+     * are drawn. Simulation continues everywhere; outside is black.
+     */
+    viewRadiusTiles: 20,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -15,18 +15,79 @@
   }
 
   function clear(ctx, w, h) {
-    ctx.fillStyle = '#1a2214';
+    // Outside the player's view radius is pure black.
+    ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, w, h);
   }
 
-  /** Draw all tiles currently visible through the camera (clamped to map). */
-  function drawWorld(ctx, world, camera, time) {
+  /**
+   * Chebyshev tile radius around the player that is drawn.
+   * Simulation continues outside; graphics are skipped.
+   */
+  function getViewRadiusTiles() {
+    const cfg = Wildborn.config;
+    return cfg && cfg.viewRadiusTiles != null ? cfg.viewRadiusTiles : 20;
+  }
+
+  /** Player tile coords (floor of center). */
+  function playerTile(player) {
+    if (!player) return { tx: 0, ty: 0 };
+    const cx = player.x + (player.w || 0) / 2;
+    const cy = player.y + (player.h || 0) / 2;
+    return {
+      tx: Math.floor(cx / TILE_SIZE),
+      ty: Math.floor(cy / TILE_SIZE),
+    };
+  }
+
+  /** True if world pixel is within the player's drawn view radius. */
+  function inViewRadius(player, wx, wy, radiusTiles) {
+    if (!player) return true;
+    radiusTiles = radiusTiles != null ? radiusTiles : getViewRadiusTiles();
+    const pt = playerTile(player);
+    const tx = Math.floor(wx / TILE_SIZE);
+    const ty = Math.floor(wy / TILE_SIZE);
+    return Math.max(Math.abs(tx - pt.tx), Math.abs(ty - pt.ty)) <= radiusTiles;
+  }
+
+  /** World-pixel AABB of the visible tile square around the player. */
+  function getViewWorldBounds(player, radiusTiles) {
+    radiusTiles = radiusTiles != null ? radiusTiles : getViewRadiusTiles();
+    const pt = playerTile(player);
+    return {
+      x0: (pt.tx - radiusTiles) * TILE_SIZE,
+      y0: (pt.ty - radiusTiles) * TILE_SIZE,
+      x1: (pt.tx + radiusTiles + 1) * TILE_SIZE,
+      y1: (pt.ty + radiusTiles + 1) * TILE_SIZE,
+      tx0: pt.tx - radiusTiles,
+      ty0: pt.ty - radiusTiles,
+      tx1: pt.tx + radiusTiles,
+      ty1: pt.ty + radiusTiles,
+    };
+  }
+
+  /** Draw all tiles currently visible through the camera AND within view radius. */
+  function drawWorld(ctx, world, camera, time, player) {
     time = time || 0;
     const mapTiles = world.MAP_TILES || Wildborn.world.MAP_TILES || 400;
-    const tx0 = Math.max(0, Math.floor(camera.x / TILE_SIZE));
-    const ty0 = Math.max(0, Math.floor(camera.y / TILE_SIZE));
-    const tx1 = Math.min(mapTiles - 1, Math.ceil((camera.x + camera.width) / TILE_SIZE));
-    const ty1 = Math.min(mapTiles - 1, Math.ceil((camera.y + camera.height) / TILE_SIZE));
+    const radius = getViewRadiusTiles();
+    const view = player ? getViewWorldBounds(player, radius) : null;
+
+    // Camera frustum clamped to map, further clamped to player view radius.
+    let tx0 = Math.max(0, Math.floor(camera.x / TILE_SIZE));
+    let ty0 = Math.max(0, Math.floor(camera.y / TILE_SIZE));
+    let tx1 = Math.min(mapTiles - 1, Math.ceil((camera.x + camera.width) / TILE_SIZE));
+    let ty1 = Math.min(mapTiles - 1, Math.ceil((camera.y + camera.height) / TILE_SIZE));
+
+    if (view) {
+      tx0 = Math.max(tx0, Math.max(0, view.tx0));
+      ty0 = Math.max(ty0, Math.max(0, view.ty0));
+      tx1 = Math.min(tx1, Math.min(mapTiles - 1, view.tx1));
+      ty1 = Math.min(ty1, Math.min(mapTiles - 1, view.ty1));
+    }
+
+    if (tx0 > tx1 || ty0 > ty1) return;
+
     const terrain = Wildborn.shapes.getShapeDefs().shared.terrain;
 
     for (let ty = ty0; ty <= ty1; ty++) {
@@ -407,6 +468,13 @@
     const phase = player.walkPhase || 0;
     const swing = Math.sin(phase) * 0.55;
     const moving = Math.abs(player.vx) + Math.abs(player.vy) > 2;
+    const swinging = (player.swingTimer || 0) > 0;
+    const swingDur = player.swingDuration || 0.28;
+    // 0 → 1 over the swing; arcs the club forward then slightly back.
+    const swingT = swinging ? 1 - player.swingTimer / swingDur : 0;
+    const weaponAngle = swinging
+      ? -0.85 + Math.sin(swingT * Math.PI) * 2.1
+      : 0;
 
     ctx.save();
     ctx.translate(cx, cy);
@@ -503,8 +571,9 @@
     ctx.ellipse(0, s * 0.08, s * 0.12, s * 0.06, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // Arms (opposite swing to legs)
-    const armSwing = moving ? -swing : 0;
+    // Arms (opposite swing to legs; forward arm follows weapon during attack)
+    const armSwing = moving && !swinging ? -swing : 0;
+    const frontArmAngle = swinging ? weaponAngle * 0.85 : armSwing;
     ctx.strokeStyle = '#b08958';
     ctx.lineWidth = s * 0.085;
     ctx.lineCap = 'round';
@@ -512,39 +581,46 @@
     ctx.moveTo(-s * 0.22, -s * 0.06);
     ctx.lineTo(-s * 0.30 - Math.sin(armSwing) * s * 0.16, s * 0.14);
     ctx.moveTo(s * 0.22, -s * 0.06);
-    ctx.lineTo(s * 0.30 + Math.sin(armSwing) * s * 0.16, s * 0.14);
+    ctx.lineTo(
+      s * 0.30 + Math.sin(frontArmAngle) * s * 0.18,
+      s * 0.14 - (1 - Math.cos(frontArmAngle)) * s * 0.12
+    );
     ctx.stroke();
 
     // Hands
     const backHandX = -s * 0.30 - Math.sin(armSwing) * s * 0.16;
     const backHandY = s * 0.14;
-    const handX = s * 0.30 + Math.sin(armSwing) * s * 0.16;
-    const handY = s * 0.14;
+    const handX = s * 0.30 + Math.sin(frontArmAngle) * s * 0.18;
+    const handY = s * 0.14 - (1 - Math.cos(frontArmAngle)) * s * 0.12;
     ctx.fillStyle = '#b08958';
     ctx.beginPath();
     ctx.arc(backHandX, backHandY, s * 0.055, 0, Math.PI * 2);
     ctx.arc(handX, handY, s * 0.055, 0, Math.PI * 2);
     ctx.fill();
 
-    // Wooden club in forward hand
+    // Wooden club in forward hand (rotates with swing)
+    const clubLen = s * 0.32;
+    const clubAng = swinging ? -0.65 + weaponAngle : -0.65;
+    const clubTipX = handX + Math.cos(clubAng) * clubLen;
+    const clubTipY = handY + Math.sin(clubAng) * clubLen;
     ctx.strokeStyle = '#6a4420';
     ctx.lineWidth = s * 0.09;
     ctx.lineCap = 'round';
     ctx.beginPath();
     ctx.moveTo(handX, handY);
-    ctx.lineTo(handX + s * 0.26, handY - s * 0.20);
+    ctx.lineTo(clubTipX, clubTipY);
     ctx.stroke();
     // Club head (knotty tip)
     ctx.fillStyle = '#5a3818';
     ctx.beginPath();
-    ctx.arc(handX + s * 0.26, handY - s * 0.20, s * 0.09, 0, Math.PI * 2);
+    ctx.arc(clubTipX, clubTipY, s * 0.09, 0, Math.PI * 2);
     ctx.fill();
     // Wood grain line
     ctx.strokeStyle = 'rgba(40, 24, 8, 0.45)';
     ctx.lineWidth = s * 0.025;
     ctx.beginPath();
-    ctx.moveTo(handX + s * 0.04, handY - s * 0.03);
-    ctx.lineTo(handX + s * 0.22, handY - s * 0.16);
+    ctx.moveTo(handX + (clubTipX - handX) * 0.15, handY + (clubTipY - handY) * 0.15);
+    ctx.lineTo(handX + (clubTipX - handX) * 0.75, handY + (clubTipY - handY) * 0.75);
     ctx.stroke();
 
     // Head
@@ -666,19 +742,28 @@
    * @param {CanvasRenderingContext2D} ctx
    * @param {object} ecosystem
    * @param {object} camera
-   * @param {object} [view] { time, hoverWorld, showDebug, showHuntLines }
+   * @param {object} [view] { time, hoverWorld, showDebug, showHuntLines, player }
    */
   function drawEcosystem(ctx, ecosystem, camera, view) {
     if (!ecosystem) return;
     view = view || {};
     const time = view.time || 0;
     const showHuntLines = !!(view.showHuntLines || view.showDebug);
+    const player = view.player || null;
+    const radius = getViewRadiusTiles();
+    const viewBounds = player ? getViewWorldBounds(player, radius) : null;
 
     const pad = 48;
-    const x0 = camera.x - pad;
-    const y0 = camera.y - pad;
-    const x1 = camera.x + camera.width + pad;
-    const y1 = camera.y + camera.height + pad;
+    let x0 = camera.x - pad;
+    let y0 = camera.y - pad;
+    let x1 = camera.x + camera.width + pad;
+    let y1 = camera.y + camera.height + pad;
+    if (viewBounds) {
+      x0 = Math.max(x0, viewBounds.x0);
+      y0 = Math.max(y0, viewBounds.y0);
+      x1 = Math.min(x1, viewBounds.x1);
+      y1 = Math.min(y1, viewBounds.y1);
+    }
 
     const plants = ecosystem.plants;
     for (let i = 0; i < plants.length; i++) {
@@ -699,8 +784,10 @@
           a.diet === 'predator' &&
           (a.state === 'SEEK_FOOD' || a.state === 'SEEK_PREY') &&
           a.target &&
-          a.target.kind === 'animal' &&
-          a.target.alive;
+          (a.target.kind === 'animal' || a.target.kind === 'player') &&
+          (a.target.kind === 'player'
+            ? a.target.alive !== false && (a.target.hp == null || a.target.hp > 0)
+            : a.target.alive);
         const showLine =
           hunting &&
           (showHuntLines || (view.hoverEntity && view.hoverEntity.id === a.id));
@@ -730,7 +817,13 @@
 
   function drawHuntLine(ctx, predator, target, camera) {
     const a = worldToScreen(camera, predator.x, predator.y);
-    const b = worldToScreen(camera, target.x, target.y);
+    let tx = target.x;
+    let ty = target.y;
+    if (target.kind === 'player') {
+      tx = target.x + (target.w || 0) / 2;
+      ty = target.y + (target.h || 0) / 2;
+    }
+    const b = worldToScreen(camera, tx, ty);
     ctx.save();
     ctx.strokeStyle = 'rgba(200,40,40,0.55)';
     ctx.lineWidth = 1;
@@ -789,8 +882,11 @@
       animal.diet === 'predator' &&
       (animal.state === 'SEEK_FOOD' || animal.state === 'SEEK_PREY') &&
       animal.target &&
-      animal.target.kind === 'animal' &&
-      animal.target.alive;
+      (animal.target.kind === 'animal' || animal.target.kind === 'player') &&
+      (animal.target.kind === 'player'
+        ? animal.target.alive !== false &&
+          (animal.target.hp == null || animal.target.hp > 0)
+        : animal.target.alive);
     const fleeing = animal.state === 'FLEE' && !animal._counterAttack;
     const rearUp =
       animal.species === 'bear' &&
@@ -994,12 +1090,15 @@
 
   /**
    * Find nearest entity under screen cursor (CSS pixels).
+   * Only entities inside the player's view radius can be picked.
    * @returns {object|null}
    */
-  function pickEntityAt(ecosystem, camera, screenX, screenY) {
+  function pickEntityAt(ecosystem, camera, screenX, screenY, player) {
     if (!ecosystem) return null;
     const worldX = camera.x + screenX;
     const worldY = camera.y + screenY;
+    if (player && !inViewRadius(player, worldX, worldY)) return null;
+
     let best = null;
     let bestD = 56 * 56;
 
@@ -1007,6 +1106,7 @@
     for (let i = 0; i < plants.length; i++) {
       const p = plants[i];
       // Allow picking depleted plants for the inspector (respawn timer)
+      if (player && !inViewRadius(player, p.x, p.y)) continue;
       const dx = p.x - worldX;
       const dy = p.y - worldY;
       const d2 = dx * dx + dy * dy;
@@ -1020,6 +1120,7 @@
     const animals = ecosystem.animals;
     for (let i = 0; i < animals.length; i++) {
       const a = animals[i];
+      if (player && !inViewRadius(player, a.x, a.y)) continue;
       const dx = a.x - worldX;
       const dy = a.y - worldY;
       const d2 = dx * dx + dy * dy;
@@ -1317,5 +1418,8 @@
     updateHud,
     setSeedDisplay,
     drawDebug,
+    getViewRadiusTiles,
+    getViewWorldBounds,
+    inViewRadius,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

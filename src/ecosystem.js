@@ -538,6 +538,8 @@
         tickSeconds: tickSeconds,
         world: world,
         mapPixelSize: mapPixelSize,
+        /** Player entity for predator hunting / counter-attacks. */
+        player: playerFocus,
         /** Decremented by animal pathfinding; 0 means reuse old paths this frame. */
         pathBudget: pathBudget,
         isWater: function (x, y) {
@@ -582,6 +584,8 @@
     // -------------------------------------------------------------------------
 
     let frameIndex = 0;
+    /** Latest player reference for predator hunting / combat. */
+    let playerFocus = null;
 
     /**
      * @param {number} dt
@@ -589,6 +593,7 @@
      */
     function update(dt, focus) {
       frameIndex += 1;
+      playerFocus = focus || null;
       // Plants only move on discrete ticks; animals move every frame.
       rebuildAnimalGrid();
       const ctx = makeCtx();
